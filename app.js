@@ -12,7 +12,7 @@ const returnBtn = document.getElementById('returnBtn');
 
 let currentManager = null;
 
-const API_BASE = window.APP_CONFIG?.API_BASE || 'http://localhost:3000';
+const API_BASE = window.APP_CONFIG?.API_BASE || 'https://approval-page.onrender.com';
 const RETURN_URL = window.APP_CONFIG?.RETURN_URL || '#';
 
 returnBtn.href = RETURN_URL;
