@@ -1,0 +1,19 @@
+{
+  "name": "qialearn-manager-approvals-backend",
+  "version": "1.0.0",
+  "description": "Backend for QIAlearn My Teams Trainings Approvals",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.9",
+    "connect-session-sequelize": "^7.1.7",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "express-session": "^1.18.1",
+    "sequelize": "^6.37.5"
+  }
+}
