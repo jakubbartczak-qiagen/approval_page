@@ -297,7 +297,7 @@ app.get('/api/auth/bootstrap', async (req, res) => {
     req.session.doceboToken = token;
 
     return req.session.save(() => {
-      return res.redirect('/frontend/index.html');
+      return res.redirect('/');
     });
   } catch (error) {
     console.error('bootstrap error:', error.response?.data || error.message);
@@ -384,9 +384,15 @@ app.post('/api/deny', requireAuth, async (req, res) => {
   }
 });
 
-app.get('/health', (req, res) => res.json({ ok: true }));
+const frontendPath = __dirname;
 
-app.use('/frontend', express.static(path.join(__dirname, '..', 'frontend')));
+app.use(express.static(frontendPath));
+
+app.get('/frontend/index.html', (req, res) => {
+  res.sendFile(path.join(frontendPath, 'index.html'));
+});
+
+app.get('/health', (req, res) => res.json({ ok: true }));
 
 app.listen(PORT, () => {
   console.log(`Backend running on port ${PORT}`);
