@@ -36,10 +36,7 @@ function firstDefined(obj, keys) {
 }
 
 function parseCsv(value) {
-  return String(value || '')
-    .split(',')
-    .map(v => v.trim())
-    .filter(Boolean);
+  return String(value || '').split(',').map(v => v.trim()).filter(Boolean);
 }
 
 function makeSig(username, time) {
@@ -47,11 +44,10 @@ function makeSig(username, time) {
 }
 
 function bootstrapFromRequest(req) {
-  return {
-    username: normalize(req.query.username || ''),
-    time: String(req.query.time || '').trim(),
-    sig: String(req.query.sig || '').trim()
-  };
+  const username = normalize(req.query.username || req.query.user || req.query.u || '');
+  const time = String(req.query.time || req.query.ts || '').trim();
+  const sig = String(req.query.sig || req.query.s || '').trim();
+  return { username, time, sig };
 }
 
 function verifyBootstrap({ username, time, sig }) {
@@ -82,14 +78,8 @@ function buildCourseUrl(courseId, courseSlug) {
 }
 
 app.set('trust proxy', 1);
-
-app.use(cors({
-  origin: FRONTEND_ORIGIN,
-  credentials: true
-}));
-
+app.use(cors({ origin: FRONTEND_ORIGIN, credentials: true }));
 app.use(express.json());
-
 app.use(session({
   secret: required('SESSION_SECRET'),
   resave: false,
@@ -149,13 +139,16 @@ async function doceboDelete(token, url) {
 }
 
 async function findUserIdByUsername(token, username) {
-  const queries = [{ username }, { search_text: username }, { q: username }];
+  const queries = [
+    { username },
+    { search_text: username },
+    { q: username }
+  ];
 
   for (const params of queries) {
     try {
       const data = await doceboGet(token, `${DOCEBO_BASE_URL}/manage/v1/user`, params);
       const candidates = data?.data?.items || data?.data?.users || data?.items || data?.users || [];
-
       if (Array.isArray(candidates) && candidates.length) {
         const exact = candidates.find(u => normalize(firstDefined(u, ['username']) || '') === normalize(username));
         const chosen = exact || candidates[0];
@@ -230,7 +223,6 @@ function normalizePendingRow(row) {
   const courseId = String(firstDefined(row, ['course_id', 'id_course', 'id']) || '');
   const sessionId = String(firstDefined(row, ['session_id']) || '');
   const courseSlug = String(firstDefined(row, ['course_slug', 'slug']) || '');
-
   return {
     user_id: String(firstDefined(row, ['user_id']) || ''),
     username: normalize(firstDefined(row, ['username']) || ''),
@@ -292,51 +284,60 @@ async function denyEnrollment(token, { courseId, sessionId, userId }) {
 
 app.get('/health', (req, res) => res.json({ ok: true }));
 
+app.get('/sso/:username', (req, res) => {
+  try {
+    const username = normalize(req.params.username);
+    if (!username) return res.status(400).send('Missing username');
+    const time = Math.floor(Date.now() / 1000).toString();
+    const sig = makeSig(username, time);
+    const url = `/api/auth/bootstrap?username=${encodeURIComponent(username)}&time=${encodeURIComponent(time)}&sig=${encodeURIComponent(sig)}`;
+    return res.redirect(url);
+  } catch (error) {
+    console.error('sso generator error:', error.message);
+    return res.status(500).send('Failed to generate signed url');
+  }
+});
+
 app.get('/api/auth/bootstrap', async (req, res) => {
   try {
-    console.log('BOOTSTRAP URL:', req.originalUrl);
-    console.log('BOOTSTRAP QUERY:', req.query);
-
     const { username, time, sig } = bootstrapFromRequest(req);
-
-    if (!username || !time || !sig) {
-      return res.status(400).json({
-        success: false,
-        error: 'Missing username, time or sig',
-        query: req.query
-      });
-    }
-
-    if (!verifyBootstrap({ username, time, sig })) {
-      return res.status(403).json({
-        success: false,
-        error: 'Invalid signature or expired link'
-      });
-    }
+    if (!username || !time || !sig) return res.status(400).json({ success: false, error: 'Missing username, time or sig' });
+    if (!verifyBootstrap({ username, time, sig })) return res.status(403).json({ success: false, error: 'Invalid signature or expired link' });
 
     const token = await loginToDocebo();
     const user = await getUserByUsername(token, username);
-
     req.session.user = user;
     req.session.username = username;
     req.session.doceboToken = token;
-
-    req.session.save(err => {
-      if (err) {
-        console.error('session save error:', err);
-        return res.status(500).json({ success: false, error: 'Session save failed' });
-      }
-      return res.json({ success: true, user });
-    });
+    req.session.save(() => res.redirect('/'));
   } catch (error) {
     console.error('bootstrap error:', error.response?.data || error.message);
     res.status(500).json({ success: false, error: 'Failed to bootstrap session' });
   }
 });
 
+app.get('/launch', async (req, res) => {
+  try {
+    const { username, time, sig } = bootstrapFromRequest(req);
+    if (!username || !time || !sig) return res.status(400).send('Missing bootstrap parameters');
+    return res.redirect(`/api/auth/bootstrap?username=${encodeURIComponent(username)}&time=${encodeURIComponent(time)}&sig=${encodeURIComponent(sig)}`);
+  } catch (error) {
+    return res.status(500).send('Launch failed');
+  }
+});
+
 app.get('/api/me', async (req, res) => {
   try {
     if (!req.session?.user) {
+      const { username, time, sig } = bootstrapFromRequest(req);
+      if (verifyBootstrap({ username, time, sig })) {
+        const token = await loginToDocebo();
+        const user = await getUserByUsername(token, username);
+        req.session.user = user;
+        req.session.username = username;
+        req.session.doceboToken = token;
+        return req.session.save(() => res.json({ success: true, user }));
+      }
       return res.status(401).json({ success: false, error: 'Not authenticated' });
     }
 
@@ -344,13 +345,7 @@ app.get('/api/me', async (req, res) => {
     const fresh = await getUserByUsername(token, req.session.username || req.session.user.username);
     req.session.user = fresh;
     req.session.doceboToken = token;
-
-    req.session.save(err => {
-      if (err) {
-        console.error('session save error:', err);
-      }
-      res.json({ success: true, user: fresh });
-    });
+    res.json({ success: true, user: fresh });
   } catch (error) {
     console.error('me error:', error.response?.data || error.message);
     res.status(500).json({ success: false, error: 'Failed to load current user' });
@@ -360,6 +355,22 @@ app.get('/api/me', async (req, res) => {
 app.get('/api/pending-items', async (req, res) => {
   try {
     if (!req.session?.user) {
+      const { username, time, sig } = bootstrapFromRequest(req);
+      if (verifyBootstrap({ username, time, sig })) {
+        const token = await loginToDocebo();
+        const user = await getUserByUsername(token, username);
+        req.session.user = user;
+        req.session.username = username;
+        req.session.doceboToken = token;
+        return req.session.save(async () => {
+          try {
+            const dashboard = await fetchDashboard(token, user);
+            res.json({ success: true, ...dashboard });
+          } catch (e) {
+            res.status(500).json({ success: false, error: 'Failed to load pending items' });
+          }
+        });
+      }
       return res.status(401).json({ success: false, error: 'Not authenticated' });
     }
 
@@ -369,13 +380,7 @@ app.get('/api/pending-items', async (req, res) => {
     req.session.doceboToken = token;
 
     const dashboard = await fetchDashboard(token, currentUser);
-
-    req.session.save(err => {
-      if (err) {
-        console.error('session save error:', err);
-      }
-      res.json({ success: true, ...dashboard });
-    });
+    res.json({ success: true, ...dashboard });
   } catch (error) {
     console.error('pending-items error:', error.response?.data || error.message);
     res.status(500).json({ success: false, error: 'Failed to load pending items' });
@@ -411,7 +416,6 @@ app.post('/api/deny', requireAuth, async (req, res) => {
 });
 
 app.use(express.static(__dirname));
-
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
