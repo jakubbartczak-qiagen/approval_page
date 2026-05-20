@@ -252,7 +252,9 @@ app.post('/api/pending-items/:id/decline', requireAuth, async (req, res) => {
 app.get(['/', '/index.html', '/approval_page/', '/approval_page/index.html'], (req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
 });
-
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok' });
+});
 app.use((req, res) => {
   res.status(404).send('Not Found');
 });
