@@ -467,13 +467,13 @@ const indexHtml = `<!DOCTYPE html>
     const el = id => document.getElementById(id);
 
     async function api(path, options = {}) {
-      const res = await fetch(`${API_BASE}${path}`, {
+      const res = await fetch(\`\${API_BASE}\${path}\`, {
         credentials: 'include',
         headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
         ...options
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      if (!res.ok) throw new Error(data.error || \`HTTP \${res.status}\`);
       return data;
     }
 
@@ -502,24 +502,24 @@ const indexHtml = `<!DOCTYPE html>
         return;
       }
 
-      el('tbody').innerHTML = items.map((item, idx) => `
+      el('tbody').innerHTML = items.map((item, idx) => \`
         <tr>
-          <td>${escapeHtml(item.fullname || item.username || '-')}</td>
-          <td>${escapeHtml(item.email || '-')}</td>
-          <td>${escapeHtml(item.course_name || '-')}</td>
-          <td>${escapeHtml(item.session_name || '-')}</td>
-          <td>${escapeHtml(item.session_start || '-')}</td>
-          <td>${escapeHtml(item.session_end || '-')}</td>
-          <td><span class="status">${escapeHtml(item.enrollment_status || 'Pending Approval')}</span></td>
-          <td><a class="link" href="${item.course_url || '#'}" target="_blank" rel="noopener">Open course</a></td>
+          <td>\${escapeHtml(item.fullname || item.username || '-')}</td>
+          <td>\${escapeHtml(item.email || '-')}</td>
+          <td>\${escapeHtml(item.course_name || '-')}</td>
+          <td>\${escapeHtml(item.session_name || '-')}</td>
+          <td>\${escapeHtml(item.session_start || '-')}</td>
+          <td>\${escapeHtml(item.session_end || '-')}</td>
+          <td><span class="status">\${escapeHtml(item.enrollment_status || 'Pending Approval')}</span></td>
+          <td><a class="link" href="\${item.course_url || '#'}" target="_blank" rel="noopener">Open course</a></td>
           <td>
             <div class="row-actions">
-              <button class="btn-approve" onclick="approveItem('${encodeURIComponent(item.user_id || idx)}')">Approve</button>
-              <button class="btn-decline" onclick="declineItem('${encodeURIComponent(item.user_id || idx)}')">Decline</button>
+              <button class="btn-approve" onclick="approveItem('\${encodeURIComponent(item.user_id || idx)}')">Approve</button>
+              <button class="btn-decline" onclick="declineItem('\${encodeURIComponent(item.user_id || idx)}')">Decline</button>
             </div>
           </td>
         </tr>
-      `).join('');
+      \`).join('');
     }
 
     async function loadDashboard() {
@@ -537,7 +537,7 @@ const indexHtml = `<!DOCTYPE html>
 
     async function approveItem(id) {
       try {
-        await api(`/api/pending-items/${id}/approve`, { method: 'POST', body: '{}' });
+        await api(\`/api/pending-items/\${id}/approve\`, { method: 'POST', body: '{}' });
         await loadDashboard();
       } catch (e) {
         alert(e.message);
@@ -546,7 +546,7 @@ const indexHtml = `<!DOCTYPE html>
 
     async function declineItem(id) {
       try {
-        await api(`/api/pending-items/${id}/decline`, { method: 'POST', body: '{}' });
+        await api(\`/api/pending-items/\${id}/decline\`, { method: 'POST', body: '{}' });
         await loadDashboard();
       } catch (e) {
         alert(e.message);
@@ -564,7 +564,9 @@ const indexHtml = `<!DOCTYPE html>
 </html>`;
 
 app.get(['/', '/index.html', '/approval_page/', '/approval_page/index.html'], (req, res) => {
-  res.type('html').send(indexHtml);
+  res.sendFile(path.join(__dirname, 'index.html'), (err) => {
+    if (err) res.status(err.statusCode || 500).send('Not Found');
+  });
 });
 
 app.use((req, res) => {
