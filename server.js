@@ -284,16 +284,39 @@ app.get('/health', (req, res) => res.json({ ok: true }));
 
 app.get('/api/auth/bootstrap', async (req, res) => {
   try {
+    console.log('BOOTSTRAP URL:', req.originalUrl);
+    console.log('BOOTSTRAP QUERY:', req.query);
+
     const { username, time, sig } = bootstrapFromRequest(req);
-    if (!username || !time || !sig) return res.status(400).json({ success: false, error: 'Missing username, time or sig' });
-    if (!verifyBootstrap({ username, time, sig })) return res.status(403).json({ success: false, error: 'Invalid signature or expired link' });
+
+    if (!username || !time || !sig) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing username, time or sig',
+        query: req.query
+      });
+    }
+
+    if (!verifyBootstrap({ username, time, sig })) {
+      return res.status(403).json({
+        success: false,
+        error: 'Invalid signature or expired link'
+      });
+    }
 
     const token = await loginToDocebo();
     const user = await getUserByUsername(token, username);
+
     req.session.user = user;
     req.session.username = username;
     req.session.doceboToken = token;
-    return req.session.save(() => res.json({ success: true, user }));
+
+    req.session.save(err => {
+      if (err) {
+        return res.status(500).json({ success: false, error: 'Session save failed' });
+      }
+      res.json({ success: true, user });
+    });
   } catch (error) {
     console.error('bootstrap error:', error.response?.data || error.message);
     res.status(500).json({ success: false, error: 'Failed to bootstrap session' });
