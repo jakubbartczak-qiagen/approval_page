@@ -273,9 +273,8 @@
   </div>
 
   <script>
-    const el = id => document.getElementById(id);
-
     const API_BASE = 'https://TWOJ-RENDER-URL.onrender.com';
+    const el = id => document.getElementById(id);
 
     async function api(path, options = {}) {
       const res = await fetch(`${API_BASE}${path}`, {
