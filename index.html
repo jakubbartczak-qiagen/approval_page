@@ -225,7 +225,11 @@
 
     function renderDashboard(data) {
       const manager = data.manager || {};
-      el('managerValue').textContent = manager.username || manager.email || 'Unknown';
+      el('managerValue').textContent =
+        manager.managerlabel ||
+        manager.managerusername ||
+        manager.email ||
+        'Unavailable';
       el('directEmployeesValue').textContent = data.directEmployees ?? 0;
       el('pendingItemsValue').textContent = data.pendingItems ?? 0;
 
