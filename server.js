@@ -35,19 +35,35 @@ function firstDefined(obj, keys) {
   return undefined;
 }
 
+function parseCsv(value) {
+  return String(value || '').split(',').map(v => v.trim()).filter(Boolean);
+}
+
 function makeSig(username, time) {
   return crypto.createHmac('sha256', BOOTSTRAP_SECRET).update(`${username}|${time}`).digest('hex');
 }
 
+function isPendingStatus(v) {
+  return ['to_confirm', 'waiting', 'pending', 'pending approval'].includes(String(v || '').toLowerCase());
+}
+
+function normalizeStatus(value) {
+  const raw = String(value || '').toLowerCase().trim();
+  if (['to_confirm', 'waiting', 'pending', 'pending approval'].includes(raw)) return 'to_confirm';
+  if (['confirmed', 'approved', 'enrolled', 'subscribed'].includes(raw)) return 'confirmed';
+  if (['denied', 'rejected'].includes(raw)) return 'denied';
+  return raw || 'to_confirm';
+}
+
+function buildCourseUrl(courseId, courseSlug) {
+  if (!courseId) return '#';
+  if (courseSlug) return `${DOCEBO_BASE_URL}/course/${encodeURIComponent(courseSlug)}`;
+  return `${DOCEBO_BASE_URL}/course/view/${encodeURIComponent(courseId)}`;
+}
+
 app.set('trust proxy', 1);
-
-app.use(cors({
-  origin: FRONTEND_ORIGIN,
-  credentials: true
-}));
-
+app.use(cors({ origin: FRONTEND_ORIGIN, credentials: true }));
 app.use(express.json());
-
 app.use(session({
   secret: required('SESSION_SECRET'),
   resave: false,
@@ -62,9 +78,7 @@ app.use(session({
 }));
 
 function requireAuth(req, res, next) {
-  if (!req.session?.user) {
-    return res.status(401).json({ success: false, error: 'Not authenticated' });
-  }
+  if (!req.session?.user) return res.status(401).json({ success: false, error: 'Not authenticated' });
   next();
 }
 
@@ -84,9 +98,26 @@ async function loginToDocebo() {
 }
 
 async function doceboGet(token, url, params = {}) {
-  const response = await axios.get(url, {
-    headers: { Authorization: `Bearer ${token}` },
-    params
+  const response = await axios.get(url, { headers: { Authorization: `Bearer ${token}` }, params });
+  return response.data;
+}
+
+async function doceboPut(token, url, body = {}) {
+  const response = await axios.put(url, body, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    }
+  });
+  return response.data;
+}
+
+async function doceboDelete(token, url) {
+  const response = await axios.delete(url, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    }
   });
   return response.data;
 }
@@ -120,8 +151,8 @@ async function getSubordinates(token, managerId) {
   return items.map(item => ({
     user_id: String(firstDefined(item, ['user_id', 'subordinate_id', 'userid']) || ''),
     username: normalize(firstDefined(item, ['username', 'subordinate_username']) || ''),
-    fullname: String(firstDefined(item, ['fullname']) || ''),
-    email: normalize(firstDefined(item, ['email']) || '')
+    fullname: String(firstDefined(item, ['fullname', 'subordinate_fullname']) || `${firstDefined(item, ['firstname', 'subordinate_firstname']) || ''} ${firstDefined(item, ['lastname', 'subordinate_lastname']) || ''}`.trim()),
+    email: normalize(firstDefined(item, ['email', 'subordinate_email']) || '')
   })).filter(x => x.user_id);
 }
 
@@ -133,27 +164,28 @@ async function getPendingUsers(token) {
   return data?.data?.items || data?.items || [];
 }
 
-function isPendingStatus(v) {
-  return ['to_confirm', 'waiting', 'pending', 'pending approval'].includes(String(v || '').toLowerCase());
-}
-
 function normalizePendingRow(row) {
   const courseId = String(firstDefined(row, ['course_id', 'id_course', 'id']) || '');
+  const sessionId = String(firstDefined(row, ['session_id']) || '');
+  const courseSlug = String(firstDefined(row, ['course_slug', 'slug']) || '');
   return {
     user_id: String(firstDefined(row, ['user_id']) || ''),
     username: normalize(firstDefined(row, ['username']) || ''),
     fullname: String(firstDefined(row, ['fullname']) || ''),
     email: normalize(firstDefined(row, ['email']) || ''),
+    course_id: courseId,
     course_name: String(firstDefined(row, ['course_name', 'name_course', 'course_title', 'title']) || 'Unknown course'),
+    course_url: buildCourseUrl(courseId, courseSlug),
+    session_id: sessionId,
     session_name: String(firstDefined(row, ['session_name', 'name_session']) || '-'),
-    session_start: String(firstDefined(row, ['session_start', 'start_date']) || '-'),
-    session_end: String(firstDefined(row, ['session_end', 'end_date']) || '-'),
-    enrollment_status: String(firstDefined(row, ['enrollment_status', 'status', 'state']) || '').toLowerCase(),
-    course_url: courseId ? `${DOCEBO_BASE_URL}/course/view/${encodeURIComponent(courseId)}` : '#'
+    session_start: String(firstDefined(row, ['session_start', 'date_start', 'start_date', 'start_at']) || '-'),
+    session_end: String(firstDefined(row, ['session_end', 'date_end', 'end_date', 'end_at']) || '-'),
+    enrollment_status: normalizeStatus(firstDefined(row, ['enrollment_status', 'status', 'state']))
   };
 }
 
 async function fetchDashboard(token, currentUser) {
+  const excludedCourseIds = parseCsv(process.env.EXCLUDED_COURSE_IDS);
   const subordinates = await getSubordinates(token, currentUser.user_id);
   const subordinateIds = new Set(subordinates.map(s => String(s.user_id)));
   const subordinateMap = new Map(subordinates.map(s => [String(s.user_id), s]));
@@ -166,24 +198,36 @@ async function fetchDashboard(token, currentUser) {
       const subordinate = subordinateMap.get(String(item.user_id));
       return {
         ...item,
-        fullname: subordinate?.fullname || item.fullname,
-        email: subordinate?.email || item.email,
-        username: subordinate?.username || item.username
+        fullname: subordinate?.fullname || item.fullname || '',
+        email: subordinate?.email || item.email || '',
+        username: subordinate?.username || item.username || ''
       };
     })
-    .filter(item => isPendingStatus(item.enrollment_status));
+    .filter(item => isPendingStatus(item.enrollment_status))
+    .filter(item => !excludedCourseIds.includes(String(item.course_id)));
 
   return {
     manager: currentUser,
-    directEmployees: subordinates.length,
-    pendingItems: items.length,
+    subordinates_count: subordinates.length,
     items
   };
 }
 
-app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'ok' });
-});
+async function approveEnrollment(token, { courseId, sessionId, userId }) {
+  const url = `${DOCEBO_BASE_URL}/learn/v1/enrollments/${encodeURIComponent(courseId)}/${encodeURIComponent(userId)}`;
+  const body = { status: 0 };
+  if (sessionId) body.session_id = Number(sessionId);
+  await doceboPut(token, url, body);
+}
+
+async function denyEnrollment(token, { courseId, sessionId, userId }) {
+  const url = sessionId
+    ? `${DOCEBO_BASE_URL}/learn/v1/enrollments/${encodeURIComponent(courseId)}/${encodeURIComponent(userId)}?session_id=${encodeURIComponent(sessionId)}`
+    : `${DOCEBO_BASE_URL}/learn/v1/enrollments/${encodeURIComponent(courseId)}/${encodeURIComponent(userId)}`;
+  await doceboDelete(token, url);
+}
+
+app.get('/health', (req, res) => res.json({ ok: true }));
 
 app.get('/api/auth/bootstrap', async (req, res) => {
   try {
@@ -238,7 +282,7 @@ app.get('/api/me', requireAuth, async (req, res) => {
   }
 });
 
-app.get('/api/dashboard', requireAuth, async (req, res) => {
+app.get('/api/pending-items', requireAuth, async (req, res) => {
   try {
     const token = req.session.doceboToken || await loginToDocebo();
     const currentUser = await getUserByUsername(token, req.session.username || req.session.user.username);
@@ -248,329 +292,48 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
     const dashboard = await fetchDashboard(token, currentUser);
     res.json({ success: true, ...dashboard });
   } catch (error) {
-    console.error('dashboard error:', error.response?.data || error.message);
-    res.status(500).json({ success: false, error: 'Failed to load dashboard' });
+    console.error('pending-items error:', error.response?.data || error.message);
+    res.status(500).json({ success: false, error: 'Failed to load pending items' });
   }
 });
 
-app.post('/api/pending-items/:id/approve', requireAuth, async (req, res) => {
-  res.json({ success: true });
+app.post('/api/approve', requireAuth, async (req, res) => {
+  try {
+    const { courseId, sessionId, userId } = req.body || {};
+    if (!courseId || !userId) {
+      return res.status(400).json({ success: false, error: 'courseId and userId are required' });
+    }
+
+    const token = req.session.doceboToken || await loginToDocebo();
+    await approveEnrollment(token, { courseId, sessionId, userId });
+    req.session.doceboToken = token;
+
+    res.json({ success: true, message: 'Enrollment approved successfully.' });
+  } catch (error) {
+    console.error('approve error:', error.response?.data || error.message);
+    res.status(500).json({ success: false, error: 'Failed to approve enrollment' });
+  }
 });
 
-app.post('/api/pending-items/:id/decline', requireAuth, async (req, res) => {
-  res.json({ success: true });
+app.post('/api/deny', requireAuth, async (req, res) => {
+  try {
+    const { courseId, sessionId, userId } = req.body || {};
+    if (!courseId || !userId) {
+      return res.status(400).json({ success: false, error: 'courseId and userId are required' });
+    }
+
+    const token = req.session.doceboToken || await loginToDocebo();
+    await denyEnrollment(token, { courseId, sessionId, userId });
+    req.session.doceboToken = token;
+
+    res.json({ success: true, message: 'Enrollment declined successfully.' });
+  } catch (error) {
+    console.error('deny error:', error.response?.data || error.message);
+    res.status(500).json({ success: false, error: 'Failed to decline enrollment' });
+  }
 });
 
-const indexHtml = `<!DOCTYPE html>
-<html lang="pl">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>QIAlearn My Teams Trainings Approvals</title>
-  <style>
-    :root {
-      --bg: #eef2f7;
-      --card: #ffffff;
-      --line: #d8e0ea;
-      --text: #1f2d3d;
-      --muted: #6b7787;
-      --blue: #2457a6;
-      --blue-dark: #1b4483;
-      --red: #e11d48;
-      --shadow: 0 6px 18px rgba(20, 35, 60, 0.08);
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      font-family: Arial, Helvetica, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-    }
-    .wrap { max-width: 1320px; margin: 22px auto; padding: 0 18px 24px; }
-    .topbar {
-      background: var(--card);
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      box-shadow: var(--shadow);
-      padding: 18px 20px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 16px;
-    }
-    .title h1 {
-      margin: 0 0 6px;
-      font-size: 28px;
-      font-weight: 700;
-      color: #16345f;
-    }
-    .title p { margin: 0; color: var(--muted); font-size: 14px; }
-    .actions { display: flex; gap: 10px; flex-wrap: wrap; }
-    .btn {
-      border: 0;
-      border-radius: 8px;
-      padding: 9px 14px;
-      font-size: 14px;
-      cursor: pointer;
-    }
-    .btn.primary { background: var(--blue); color: #fff; }
-    .btn.primary:hover { background: var(--blue-dark); }
-    .btn.light { background: #f3f6fa; color: #334155; border: 1px solid var(--line); }
-    .stats { display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: 14px; margin-top: 16px; }
-    .stat {
-      background: var(--card);
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      box-shadow: var(--shadow);
-      padding: 14px 16px;
-      min-height: 72px;
-      position: relative;
-      overflow: hidden;
-    }
-    .stat::before {
-      content: "";
-      position: absolute;
-      left: 0;
-      top: 0;
-      width: 5px;
-      height: 100%;
-      background: var(--blue);
-    }
-    .stat .label {
-      font-size: 11px;
-      color: var(--muted);
-      text-transform: uppercase;
-      letter-spacing: .04em;
-      margin-bottom: 8px;
-    }
-    .stat .value { font-size: 18px; font-weight: 700; word-break: break-word; }
-    .table-card {
-      margin-top: 14px;
-      background: var(--card);
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      box-shadow: var(--shadow);
-      overflow: hidden;
-    }
-    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-    thead th {
-      background: #f6f8fb;
-      color: #4b5563;
-      font-size: 12px;
-      text-transform: uppercase;
-      letter-spacing: .03em;
-      text-align: left;
-      padding: 14px 12px;
-      border-bottom: 1px solid var(--line);
-    }
-    tbody td {
-      padding: 12px;
-      font-size: 13px;
-      border-bottom: 1px solid #edf1f5;
-      vertical-align: top;
-      word-break: break-word;
-    }
-    tbody tr:hover { background: #fafcff; }
-    .status {
-      display: inline-block;
-      background: #e9eff8;
-      color: #35568e;
-      border-radius: 999px;
-      padding: 6px 10px;
-      font-weight: 700;
-      font-size: 12px;
-      white-space: nowrap;
-    }
-    .link { color: var(--blue); text-decoration: none; font-weight: 700; white-space: nowrap; }
-    .link:hover { text-decoration: underline; }
-    .row-actions { display: grid; gap: 6px; }
-    .btn-approve, .btn-decline {
-      color: #fff;
-      border: 0;
-      border-radius: 7px;
-      padding: 8px 10px;
-      font-size: 13px;
-      cursor: pointer;
-      width: 100%;
-      font-weight: 700;
-    }
-    .btn-approve { background: var(--blue); }
-    .btn-decline { background: var(--red); }
-    .error {
-      background: #fff1f2;
-      color: #9f1239;
-      border: 1px solid #fecdd3;
-      padding: 12px 14px;
-      border-radius: 10px;
-      margin-top: 14px;
-      display: none;
-    }
-    .empty { padding: 24px; text-align: center; color: var(--muted); }
-    @media (max-width: 1100px) { .stats { grid-template-columns: 1fr; } table { table-layout: auto; } }
-    @media (max-width: 760px) { .topbar { flex-direction: column; align-items: flex-start; } .title h1 { font-size: 22px; } }
-  </style>
-</head>
-<body>
-  <div class="wrap">
-    <div class="topbar">
-      <div class="title">
-        <h1>QIAlearn My Teams Trainings Approvals</h1>
-        <p>Review and manage pending enrollment requests for your direct employees.</p>
-      </div>
-      <div class="actions">
-        <button class="btn primary" id="backBtn">Return to My Team Page</button>
-        <button class="btn light" id="refreshBtn">Refresh</button>
-      </div>
-    </div>
+app.use(express.static(__dirname));
+app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
-    <div class="stats">
-      <div class="stat">
-        <div class="label">Manager</div>
-        <div class="value" id="managerValue">Loading...</div>
-      </div>
-      <div class="stat">
-        <div class="label">Direct Employees</div>
-        <div class="value" id="directEmployeesValue">-</div>
-      </div>
-      <div class="stat">
-        <div class="label">Pending Items</div>
-        <div class="value" id="pendingItemsValue">-</div>
-      </div>
-    </div>
-
-    <div class="error" id="errorBox"></div>
-
-    <div class="table-card">
-      <table>
-        <thead>
-          <tr>
-            <th style="width: 14%;">User</th>
-            <th style="width: 14%;">Email</th>
-            <th style="width: 20%;">Course</th>
-            <th style="width: 13%;">Session Name</th>
-            <th style="width: 10%;">Session Start</th>
-            <th style="width: 10%;">Session End</th>
-            <th style="width: 10%;">Status</th>
-            <th style="width: 9%;">Course Link</th>
-            <th style="width: 10%;">Actions</th>
-          </tr>
-        </thead>
-        <tbody id="tbody">
-          <tr><td colspan="9" class="empty">Loading...</td></tr>
-        </tbody>
-      </table>
-    </div>
-  </div>
-
-  <script>
-    const API_BASE = 'https://TWOJ-RENDER-URL.onrender.com';
-    const el = id => document.getElementById(id);
-
-    async function api(path, options = {}) {
-      const res = await fetch(\`\${API_BASE}\${path}\`, {
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
-        ...options
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || \`HTTP \${res.status}\`);
-      return data;
-    }
-
-    function escapeHtml(str) {
-      return String(str)
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;')
-        .replaceAll('"', '&quot;')
-        .replaceAll("'", '&#39;');
-    }
-
-    function renderDashboard(data) {
-      const manager = data.manager || {};
-      el('managerValue').textContent =
-        manager.managerlabel ||
-        manager.managerusername ||
-        manager.email ||
-        'Unavailable';
-      el('directEmployeesValue').textContent = data.directEmployees ?? 0;
-      el('pendingItemsValue').textContent = data.pendingItems ?? 0;
-
-      const items = data.items || [];
-      if (!items.length) {
-        el('tbody').innerHTML = '<tr><td colspan="9" class="empty">No pending items.</td></tr>';
-        return;
-      }
-
-      el('tbody').innerHTML = items.map((item, idx) => \`
-        <tr>
-          <td>\${escapeHtml(item.fullname || item.username || '-')}</td>
-          <td>\${escapeHtml(item.email || '-')}</td>
-          <td>\${escapeHtml(item.course_name || '-')}</td>
-          <td>\${escapeHtml(item.session_name || '-')}</td>
-          <td>\${escapeHtml(item.session_start || '-')}</td>
-          <td>\${escapeHtml(item.session_end || '-')}</td>
-          <td><span class="status">\${escapeHtml(item.enrollment_status || 'Pending Approval')}</span></td>
-          <td><a class="link" href="\${item.course_url || '#'}" target="_blank" rel="noopener">Open course</a></td>
-          <td>
-            <div class="row-actions">
-              <button class="btn-approve" onclick="approveItem('\${encodeURIComponent(item.user_id || idx)}')">Approve</button>
-              <button class="btn-decline" onclick="declineItem('\${encodeURIComponent(item.user_id || idx)}')">Decline</button>
-            </div>
-          </td>
-        </tr>
-      \`).join('');
-    }
-
-    async function loadDashboard() {
-      el('errorBox').style.display = 'none';
-      try {
-        const data = await api('/api/dashboard');
-        renderDashboard(data);
-      } catch (e) {
-        el('errorBox').textContent = e.message;
-        el('errorBox').style.display = 'block';
-        el('tbody').innerHTML = '<tr><td colspan="9" class="empty">Failed to load data.</td></tr>';
-        el('managerValue').textContent = 'Unavailable';
-      }
-    }
-
-    async function approveItem(id) {
-      try {
-        await api(\`/api/pending-items/\${id}/approve\`, { method: 'POST', body: '{}' });
-        await loadDashboard();
-      } catch (e) {
-        alert(e.message);
-      }
-    }
-
-    async function declineItem(id) {
-      try {
-        await api(\`/api/pending-items/\${id}/decline\`, { method: 'POST', body: '{}' });
-        await loadDashboard();
-      } catch (e) {
-        alert(e.message);
-      }
-    }
-
-    el('refreshBtn').addEventListener('click', loadDashboard);
-    el('backBtn').addEventListener('click', () => {
-      window.location.href = 'https://qiagen.docebosaas.com/';
-    });
-
-    loadDashboard();
-  </script>
-</body>
-</html>`;
-
-app.get(['/', '/index.html', '/approval_page/', '/approval_page/index.html'], (req, res) => {
-  res.sendFile(path.join(__dirname, 'index.html'), (err) => {
-    if (err) res.status(err.statusCode || 500).send('Not Found');
-  });
-});
-
-app.use((req, res) => {
-  res.status(404).send('Not Found');
-});
-
-app.listen(PORT, () => console.log(`Server running on ${PORT}`));
+app.listen(PORT, () => console.log(`Backend running on port ${PORT}`));
