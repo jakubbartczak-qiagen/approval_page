@@ -13,12 +13,12 @@
       --muted: #6b7787;
       --blue: #2457a6;
       --blue-dark: #1b4483;
-      --green: #2f9d57;
-      --red: #d7263d;
+      --red: #e11d48;
       --shadow: 0 6px 18px rgba(20, 35, 60, 0.08);
     }
 
     * { box-sizing: border-box; }
+
     body {
       margin: 0;
       font-family: Arial, Helvetica, sans-serif;
@@ -148,7 +148,7 @@
       font-size: 13px;
       border-bottom: 1px solid #edf1f5;
       vertical-align: top;
-      word-wrap: break-word;
+      word-break: break-word;
     }
 
     tbody tr:hover { background: #fafcff; }
@@ -173,15 +173,9 @@
 
     .link:hover { text-decoration: underline; }
 
-    .stack {
-      display: grid;
-      gap: 6px;
-    }
-
     .row-actions {
       display: grid;
       gap: 6px;
-      min-width: 92px;
     }
 
     .btn-approve,
@@ -196,10 +190,9 @@
       font-weight: 700;
     }
 
-    .btn-approve { background: #2457a6; }
-    .btn-decline { background: #e11d48; }
+    .btn-approve { background: var(--blue); }
+    .btn-decline { background: var(--red); }
 
-    .muted { color: var(--muted); }
     .error {
       background: #fff1f2;
       color: #9f1239;
@@ -282,8 +275,10 @@
   <script>
     const el = id => document.getElementById(id);
 
+    const API_BASE = 'https://TWOJ-RENDER-URL.onrender.com';
+
     async function api(path, options = {}) {
-      const res = await fetch(path, {
+      const res = await fetch(`${API_BASE}${path}`, {
         credentials: 'include',
         headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
         ...options
@@ -291,6 +286,15 @@
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
       return data;
+    }
+
+    function escapeHtml(str) {
+      return String(str)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
     }
 
     function renderDashboard(data) {
@@ -356,17 +360,7 @@
       }
     }
 
-    function escapeHtml(str) {
-      return String(str)
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;')
-        .replaceAll('"', '&quot;')
-        .replaceAll("'", '&#39;');
-    }
-
     el('refreshBtn').addEventListener('click', loadDashboard);
-
     el('backBtn').addEventListener('click', () => {
       window.location.href = 'https://qiagen.docebosaas.com/';
     });
