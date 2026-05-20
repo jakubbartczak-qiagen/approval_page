@@ -1,155 +1,160 @@
 <!doctype html>
-<html lang="pl">
+<html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Approval page</title>
   <style>
+    :root {
+      --bg: #f4f5f7;
+      --card: #fff;
+      --text: #1f2937;
+      --muted: #6b7280;
+      --danger: #b42318;
+      --border: #e5e7eb;
+    }
     body {
+      margin: 0;
       font-family: Arial, sans-serif;
-      margin: 24px;
-      background: #f7f7f7;
-      color: #222;
+      background: var(--bg);
+      color: var(--text);
+    }
+    .wrap {
+      padding: 18px;
     }
     .card {
-      background: #fff;
-      border-radius: 12px;
-      padding: 16px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      box-shadow: 0 1px 8px rgba(0,0,0,.04);
+      padding: 18px;
       margin-bottom: 16px;
-      box-shadow: 0 2px 10px rgba(0,0,0,.06);
     }
-    .muted { color: #666; }
-    .error { color: #b00020; }
+    h1, h2 {
+      margin: 0 0 14px;
+    }
+    .error {
+      color: var(--danger);
+      margin: 0 0 10px;
+    }
+    .muted {
+      color: var(--muted);
+    }
+    .item {
+      border-top: 1px solid var(--border);
+      padding: 14px 0;
+    }
+    .item:first-child {
+      border-top: 0;
+      padding-top: 0;
+    }
+    .btns {
+      display: flex;
+      gap: 8px;
+      margin-top: 10px;
+    }
     button {
-      margin-right: 8px;
-      padding: 8px 14px;
       border: 0;
-      border-radius: 8px;
+      padding: 10px 14px;
+      border-radius: 10px;
       cursor: pointer;
     }
-    .approve { background: #1f8f4a; color: white; }
-    .deny { background: #c62828; color: white; }
-    .item {
-      border: 1px solid #e5e5e5;
-      border-radius: 10px;
-      padding: 12px;
-      margin-top: 12px;
-      background: #fafafa;
+    .approve { background: #16a34a; color: white; }
+    .deny { background: #dc2626; color: white; }
+    a {
+      color: #2563eb;
+      text-decoration: none;
     }
-    a { color: #0b57d0; text-decoration: none; }
   </style>
 </head>
 <body>
-  <div class="card">
-    <h1>Approval page</h1>
-    <div id="status" class="muted">Ładowanie...</div>
-    <div id="user" style="margin-top:8px;"></div>
-  </div>
+  <div class="wrap">
+    <div class="card">
+      <h1>Approval page</h1>
+      <div id="status" class="error">Loading…</div>
+      <div id="user" class="muted"></div>
+    </div>
 
-  <div class="card">
-    <h2>Pending items</h2>
-    <div id="items" class="muted">Ładowanie...</div>
+    <div class="card">
+      <h2>Pending items</h2>
+      <div id="items" class="muted">Loading pending items…</div>
+    </div>
   </div>
 
   <script>
-    const statusEl = document.getElementById("status");
-    const userEl = document.getElementById("user");
-    const itemsEl = document.getElementById("items");
+    const statusEl = document.getElementById('status');
+    const userEl = document.getElementById('user');
+    const itemsEl = document.getElementById('items');
 
-    async function api(url, options = {}) {
-      const response = await fetch(url, {
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-          ...(options.headers || {})
-        },
+    async function api(path, options = {}) {
+      const res = await fetch(path, {
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
         ...options
       });
-
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok || data.success === false) {
-        throw new Error(data.error || `HTTP ${response.status}`);
-      }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
       return data;
     }
 
-    function escapeHtml(s) {
-      return String(s || "")
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;")
-        .replaceAll("'", "&#039;");
-    }
-
-    function escapeJs(s) {
-      return String(s || "").replaceAll("\\", "\\\\").replaceAll("'", "\\'");
-    }
-
-    async function loadMe() {
-      const data = await api("/api/me");
-      const u = data.user || {};
-      userEl.innerHTML = `
-        <strong>${escapeHtml((u.firstname || "") + " " + (u.lastname || "")).trim()}</strong><br>
-        <span class="muted">${escapeHtml(u.username || "")}</span>
-      `;
-      return u;
-    }
-
-    async function loadItems() {
-      const data = await api("/api/pending-items");
-      const items = data.items || [];
-
+    function renderItems(items) {
       if (!items.length) {
-        itemsEl.innerHTML = '<div class="muted">Brak oczekujących wpisów.</div>';
+        itemsEl.innerHTML = '<div class="muted">No pending items found.</div>';
         return;
       }
 
       itemsEl.innerHTML = items.map(item => `
         <div class="item">
-          <div><strong>${escapeHtml(item.course_name || "Unknown course")}</strong></div>
-          <div class="muted">User: ${escapeHtml(item.fullname || item.username || "")}</div>
-          <div class="muted">Email: ${escapeHtml(item.email || "")}</div>
-          <div class="muted">Session: ${escapeHtml(item.session_name || "-")}</div>
-          <div class="muted">Status: ${escapeHtml(item.enrollment_status || "")}</div>
-          <div style="margin-top:10px;">
-            <button class="approve" onclick="approveItem('${escapeJs(item.course_id)}','${escapeJs(item.session_id)}','${escapeJs(item.user_id)}')">Approve</button>
-            <button class="deny" onclick="denyItem('${escapeJs(item.course_id)}','${escapeJs(item.session_id)}','${escapeJs(item.user_id)}')">Deny</button>
-            <a href="${item.course_url || '#'}" target="_blank" rel="noreferrer">Open course</a>
+          <div><strong>${item.fullname || item.username || item.user_id}</strong></div>
+          <div class="muted">${item.email || ''}</div>
+          <div>${item.course_name || ''}</div>
+          <div><a href="${item.course_url}" target="_blank" rel="noreferrer">Open course</a></div>
+          <div class="btns">
+            <button class="approve" data-action="approve" data-user="${item.user_id}" data-course="${item.course_id}" data-session="${item.session_id || ''}">Approve</button>
+            <button class="deny" data-action="deny" data-user="${item.user_id}" data-course="${item.course_id}" data-session="${item.session_id || ''}">Deny</button>
           </div>
         </div>
-      `).join("");
-    }
+      `).join('');
 
-    async function approveItem(courseId, sessionId, userId) {
-      if (!confirm("Approve this enrollment?")) return;
-      await api("/api/approve", {
-        method: "POST",
-        body: JSON.stringify({ courseId, sessionId, userId })
+      itemsEl.querySelectorAll('button').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const payload = {
+            userId: btn.dataset.user,
+            courseId: btn.dataset.course,
+            sessionId: btn.dataset.session || undefined
+          };
+          const path = btn.dataset.action === 'approve' ? '/api/approve' : '/api/deny';
+          btn.disabled = true;
+          try {
+            await api(path, {
+              method: 'POST',
+              body: JSON.stringify(payload)
+            });
+            await load();
+          } catch (e) {
+            alert(e.message);
+          } finally {
+            btn.disabled = false;
+          }
+        });
       });
-      await loadItems();
     }
 
-    async function denyItem(courseId, sessionId, userId) {
-      if (!confirm("Deny this enrollment?")) return;
-      await api("/api/deny", {
-        method: "POST",
-        body: JSON.stringify({ courseId, sessionId, userId })
-      });
-      await loadItems();
-    }
-
-    (async () => {
+    async function load() {
       try {
-        statusEl.textContent = "Sprawdzam sesję...";
-        await loadMe();
-        statusEl.textContent = "Zalogowano";
-        await loadItems();
-      } catch (err) {
-        statusEl.innerHTML = `<span class="error">${escapeHtml(err.message)}</span>`;
-        itemsEl.innerHTML = '<div class="muted">Nie udało się wczytać danych.</div>';
+        const me = await api('/api/me');
+        userEl.textContent = `Logged in as: ${me.user.firstname || ''} ${me.user.lastname || ''} (${me.user.username})`.trim();
+        const data = await api('/api/pending-items');
+        statusEl.textContent = '';
+        renderItems(data.items || []);
+      } catch (e) {
+        statusEl.textContent = 'Failed to load pending items';
+        itemsEl.textContent = 'Nie udało się wczytać danych.';
+        userEl.textContent = '';
       }
-    })();
+    }
+
+    load();
   </script>
 </body>
 </html>
