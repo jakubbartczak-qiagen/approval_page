@@ -14,7 +14,7 @@ const NODE_ENV = process.env.NODE_ENV || 'development';
 const IS_PROD = NODE_ENV === 'production';
 
 const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || 'https://jakubbartczak-qiagen.github.io';
-const DOCEBO_BASE_URL = (process.env.DOCEBO_BASE_URL || process.env.DOCEBO_BASE_URL || '').replace(/\/$/, '');
+const DOCEBO_BASE_URL = (process.env.DOCEBO_BASE_URL || '').replace(/\/$/, '');
 const BOOTSTRAP_SECRET = process.env.BOOTSTRAP_SECRET || '';
 
 function required(name) {
@@ -138,16 +138,59 @@ async function doceboDelete(token, url) {
   return response.data;
 }
 
+async function findUserIdByUsername(token, username) {
+  const queries = [
+    { username },
+    { search_text: username },
+    { q: username }
+  ];
+
+  for (const params of queries) {
+    try {
+      const data = await doceboGet(token, `${DOCEBO_BASE_URL}/manage/v1/user`, params);
+      const candidates = data?.data?.items || data?.data?.users || data?.items || data?.users || [];
+      if (Array.isArray(candidates) && candidates.length) {
+        const exact = candidates.find(u => normalize(firstDefined(u, ['username']) || '') === normalize(username));
+        const chosen = exact || candidates[0];
+        const id = String(firstDefined(chosen, ['user_id', 'userid', 'id']) || '');
+        if (id) return { user_id: id, raw: chosen };
+      }
+
+      const direct = data?.data?.user_data || data?.data || data || {};
+      const id = String(firstDefined(direct, ['user_id', 'userid', 'id']) || '');
+      const directUsername = normalize(firstDefined(direct, ['username']) || '');
+      if (id && (!directUsername || directUsername === normalize(username))) {
+        return { user_id: id, raw: direct };
+      }
+    } catch (e) {}
+  }
+
+  return { user_id: '', raw: {} };
+}
+
 async function getUserByUsername(token, username) {
-  const data = await doceboGet(token, `${DOCEBO_BASE_URL}/manage/v1/user`, { username });
-  const user = data?.data?.user_data || data?.data || data || {};
+  const found = await findUserIdByUsername(token, username);
+  let user = found.raw || {};
+
+  if (found.user_id) {
+    try {
+      const byId = await doceboGet(token, `${DOCEBO_BASE_URL}/manage/v1/user/${encodeURIComponent(found.user_id)}`);
+      user = byId?.data?.user_data || byId?.data || byId || user;
+    } catch (e) {
+      try {
+        const byId = await doceboGet(token, `${DOCEBO_BASE_URL}/manage/v1/user`, { user_id: found.user_id });
+        user = byId?.data?.user_data || byId?.data || byId || user;
+      } catch (e2) {}
+    }
+  }
+
   const managerid = String(firstDefined(user, ['managerid', 'manager_id', 'managerId']) || '');
   const managerusername = normalize(firstDefined(user, ['managerusername', 'manager_username', 'managerUserName']) || '');
   const managerfirstname = String(firstDefined(user, ['managerfirstname', 'manager_first_name', 'managerFirstName']) || '');
   const managerlastname = String(firstDefined(user, ['managerlastname', 'manager_last_name', 'managerLastName']) || '');
 
   return {
-    user_id: String(firstDefined(user, ['user_id', 'userid', 'id']) || ''),
+    user_id: String(firstDefined(user, ['user_id', 'userid', 'id']) || found.user_id || ''),
     username: normalize(firstDefined(user, ['username']) || username),
     firstname: String(firstDefined(user, ['firstname', 'first_name', 'fullname', 'name']) || ''),
     lastname: String(firstDefined(user, ['lastname', 'last_name']) || ''),
@@ -245,10 +288,8 @@ app.get('/sso/:username', (req, res) => {
   try {
     const username = normalize(req.params.username);
     if (!username) return res.status(400).send('Missing username');
-
     const time = Math.floor(Date.now() / 1000).toString();
     const sig = makeSig(username, time);
-
     const url = `/api/auth/bootstrap?username=${encodeURIComponent(username)}&time=${encodeURIComponent(time)}&sig=${encodeURIComponent(sig)}`;
     return res.redirect(url);
   } catch (error) {
@@ -256,6 +297,7 @@ app.get('/sso/:username', (req, res) => {
     return res.status(500).send('Failed to generate signed url');
   }
 });
+
 app.get('/api/auth/bootstrap', async (req, res) => {
   try {
     const { username, time, sig } = bootstrapFromRequest(req);
