@@ -5,6 +5,7 @@ const axios = require('axios');
 const cors = require('cors');
 const session = require('express-session');
 const path = require('path');
+const crypto = require('crypto');
 
 const app = express();
 
@@ -14,6 +15,7 @@ const IS_PROD = NODE_ENV === 'production';
 
 const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || 'http://localhost:5500';
 const DOCEBO_BASE_URL = (process.env.DOCEBO_BASE_URL || '').replace(/\/$/, '');
+const BOOTSTRAP_SECRET = process.env.BOOTSTRAP_SECRET;
 
 function getRequiredEnv(name) {
   const value = process.env[name];
@@ -50,14 +52,17 @@ function isPendingStatus(value) {
   return ['to_confirm', 'waiting', 'pending'].includes(String(value || '').toLowerCase());
 }
 
-function escapeVal(value) {
-  return String(value || '').replaceAll('"', '&quot;').replaceAll("'", '&#039;');
-}
-
 function buildCourseUrl(courseId, courseSlug) {
   if (!courseId) return '#';
   if (courseSlug) return `${DOCEBO_BASE_URL}/course/${encodeURIComponent(courseSlug)}`;
   return `${DOCEBO_BASE_URL}/course/view/${encodeURIComponent(courseId)}`;
+}
+
+function makeBootstrapSig(username, time) {
+  return crypto
+    .createHmac('sha256', BOOTSTRAP_SECRET || '')
+    .update(`${username}|${time}`)
+    .digest('hex');
 }
 
 app.set('trust proxy', 1);
@@ -150,6 +155,22 @@ async function getUserById(token, userId) {
   return {
     user_id: String(firstDefined(user, ['user_id', 'userid', 'id']) || userId),
     username: String(firstDefined(user, ['username']) || ''),
+    firstname: String(firstDefined(user, ['first_name', 'firstname']) || ''),
+    lastname: String(firstDefined(user, ['last_name', 'lastname']) || ''),
+    email: String(firstDefined(user, ['email']) || ''),
+    managerid: String(firstDefined(user, ['manager_id', 'managerid']) || ''),
+    managerusername: String(firstDefined(user, ['manager_username', 'managerusername']) || ''),
+    canManageSubordinates: Boolean(firstDefined(user, ['can_manage_subordinates', 'canmanagesubordinates']))
+  };
+}
+
+async function getUserByUsername(token, username) {
+  const data = await doceboGet(token, `${DOCEBO_BASE_URL}/manage/v1/user`, { username });
+  const user = data?.data?.user_data || data?.data || data || {};
+
+  return {
+    user_id: String(firstDefined(user, ['user_id', 'userid', 'id']) || ''),
+    username: String(firstDefined(user, ['username']) || username || ''),
     firstname: String(firstDefined(user, ['first_name', 'firstname']) || ''),
     lastname: String(firstDefined(user, ['last_name', 'lastname']) || ''),
     email: String(firstDefined(user, ['email']) || ''),
@@ -255,20 +276,38 @@ async function denyEnrollment(token, { courseId, sessionId, userId }) {
 
 app.get('/api/auth/bootstrap', async (req, res) => {
   try {
-    const userId = String(req.query.user_id || req.query.userId || '').trim();
-    if (!userId) {
-      return res.status(400).json({ success: false, error: 'Missing user_id' });
+    const username = String(req.query.username || req.query.user || '').trim().toLowerCase();
+    const time = String(req.query.time || '').trim();
+    const sig = String(req.query.sig || '').trim();
+
+    if (!username || !time || !sig) {
+      return res.status(400).json({ success: false, error: 'Missing username, time or sig' });
+    }
+
+    if (!BOOTSTRAP_SECRET) {
+      return res.status(500).json({ success: false, error: 'Missing BOOTSTRAP_SECRET' });
+    }
+
+    const expected = makeBootstrapSig(username, time);
+    const a = Buffer.from(sig);
+    const b = Buffer.from(expected);
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+      return res.status(403).json({ success: false, error: 'Invalid signature' });
+    }
+
+    const now = Math.floor(Date.now() / 1000);
+    if (Math.abs(now - Number(time)) > 300) {
+      return res.status(403).json({ success: false, error: 'Expired link' });
     }
 
     const token = await loginToDocebo();
-    const user = await getUserById(token, userId);
+    const user = await getUserByUsername(token, username);
 
     req.session.user = user;
     req.session.doceboToken = token;
 
-    return res.json({
-      success: true,
-      user
+    return req.session.save(() => {
+      return res.redirect('/frontend/index.html');
     });
   } catch (error) {
     console.error('bootstrap error:', error.response?.data || error.message);
