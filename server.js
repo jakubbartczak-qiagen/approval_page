@@ -44,9 +44,9 @@ function makeSig(username, time) {
 }
 
 function bootstrapFromRequest(req) {
-  const username = normalize(req.query.username || req.query.user || req.query.u || '');
-  const time = String(req.query.time || req.query.ts || '').trim();
-  const sig = String(req.query.sig || req.query.s || '').trim();
+  const username = normalize(req.query.username || '');
+  const time = String(req.query.time || '').trim();
+  const sig = String(req.query.sig || '').trim();
   return { username, time, sig };
 }
 
@@ -139,16 +139,13 @@ async function doceboDelete(token, url) {
 }
 
 async function findUserIdByUsername(token, username) {
-  const queries = [
-    { username },
-    { search_text: username },
-    { q: username }
-  ];
+  const queries = [{ username }, { search_text: username }, { q: username }];
 
   for (const params of queries) {
     try {
       const data = await doceboGet(token, `${DOCEBO_BASE_URL}/manage/v1/user`, params);
       const candidates = data?.data?.items || data?.data?.users || data?.items || data?.users || [];
+
       if (Array.isArray(candidates) && candidates.length) {
         const exact = candidates.find(u => normalize(firstDefined(u, ['username']) || '') === normalize(username));
         const chosen = exact || candidates[0];
@@ -223,6 +220,7 @@ function normalizePendingRow(row) {
   const courseId = String(firstDefined(row, ['course_id', 'id_course', 'id']) || '');
   const sessionId = String(firstDefined(row, ['session_id']) || '');
   const courseSlug = String(firstDefined(row, ['course_slug', 'slug']) || '');
+
   return {
     user_id: String(firstDefined(row, ['user_id']) || ''),
     username: normalize(firstDefined(row, ['username']) || ''),
@@ -284,20 +282,6 @@ async function denyEnrollment(token, { courseId, sessionId, userId }) {
 
 app.get('/health', (req, res) => res.json({ ok: true }));
 
-app.get('/sso/:username', (req, res) => {
-  try {
-    const username = normalize(req.params.username);
-    if (!username) return res.status(400).send('Missing username');
-    const time = Math.floor(Date.now() / 1000).toString();
-    const sig = makeSig(username, time);
-    const url = `/api/auth/bootstrap?username=${encodeURIComponent(username)}&time=${encodeURIComponent(time)}&sig=${encodeURIComponent(sig)}`;
-    return res.redirect(url);
-  } catch (error) {
-    console.error('sso generator error:', error.message);
-    return res.status(500).send('Failed to generate signed url');
-  }
-});
-
 app.get('/api/auth/bootstrap', async (req, res) => {
   try {
     const { username, time, sig } = bootstrapFromRequest(req);
@@ -309,20 +293,10 @@ app.get('/api/auth/bootstrap', async (req, res) => {
     req.session.user = user;
     req.session.username = username;
     req.session.doceboToken = token;
-    req.session.save(() => res.redirect('/'));
+    return req.session.save(() => res.json({ success: true, user }));
   } catch (error) {
     console.error('bootstrap error:', error.response?.data || error.message);
     res.status(500).json({ success: false, error: 'Failed to bootstrap session' });
-  }
-});
-
-app.get('/launch', async (req, res) => {
-  try {
-    const { username, time, sig } = bootstrapFromRequest(req);
-    if (!username || !time || !sig) return res.status(400).send('Missing bootstrap parameters');
-    return res.redirect(`/api/auth/bootstrap?username=${encodeURIComponent(username)}&time=${encodeURIComponent(time)}&sig=${encodeURIComponent(sig)}`);
-  } catch (error) {
-    return res.status(500).send('Launch failed');
   }
 });
 
