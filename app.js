@@ -12,8 +12,8 @@ const returnBtn = document.getElementById('returnBtn');
 
 let currentManager = null;
 
-const API_BASE = window.APP_CONFIG?.API_BASE || 'https://approval-page.onrender.com';
-const RETURN_URL = window.APP_CONFIG?.RETURN_URL || '#';
+const API_BASE = window.APP_CONFIG?.API_BASE || 'https://TWOJ-RENDER-URL.onrender.com';
+const RETURN_URL = window.APP_CONFIG?.RETURN_URL || 'https://qiagen.docebosaas.com/';
 
 returnBtn.href = RETURN_URL;
 
@@ -79,6 +79,7 @@ function formatEnrollmentStatus(value) {
 function renderManager(manager) {
   const fullName =
     [manager?.firstname, manager?.lastname].filter(Boolean).join(' ').trim() ||
+    manager?.managerlabel ||
     manager?.username ||
     manager?.user_id ||
     '-';
