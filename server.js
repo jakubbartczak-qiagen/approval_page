@@ -66,10 +66,12 @@ function makeBootstrapSig(username, time) {
 }
 
 app.set('trust proxy', 1);
+
 app.use(cors({
   origin: FRONTEND_ORIGIN,
   credentials: true
 }));
+
 app.use(express.json());
 
 app.use(session({
@@ -114,16 +116,6 @@ async function doceboGet(token, url, params = {}) {
   const response = await axios.get(url, {
     headers: { Authorization: `Bearer ${token}` },
     params
-  });
-  return response.data;
-}
-
-async function doceboPost(token, url, body = {}) {
-  const response = await axios.post(url, body, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json'
-    }
   });
   return response.data;
 }
@@ -233,9 +225,7 @@ async function fetchDashboardData(token, currentUser) {
   const subordinateIds = new Set(subordinates.map(s => String(s.user_id)));
 
   const rawPending = await getPendingUsers(token);
-  const subordinateMap = new Map(
-    subordinates.map(s => [String(s.user_id), s])
-  );
+  const subordinateMap = new Map(subordinates.map(s => [String(s.user_id), s]));
 
   const items = rawPending
     .filter(row => subordinateIds.has(String(firstDefined(row, ['user_id']) || '')))
