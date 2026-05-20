@@ -23,11 +23,8 @@ function required(name) {
   return value;
 }
 
-function bootstrapSig(username, time) {
-  return crypto
-    .createHmac('sha256', BOOTSTRAP_SECRET)
-    .update(`${username}|${time}`)
-    .digest('hex');
+function normalize(v) {
+  return String(v || '').trim().toLowerCase();
 }
 
 function firstDefined(obj, keys) {
@@ -38,8 +35,8 @@ function firstDefined(obj, keys) {
   return undefined;
 }
 
-function normalizeEmail(v) {
-  return String(v || '').trim().toLowerCase();
+function makeSig(username, time) {
+  return crypto.createHmac('sha256', BOOTSTRAP_SECRET).update(`${username}|${time}`).digest('hex');
 }
 
 app.set('trust proxy', 1);
@@ -100,13 +97,12 @@ async function getUserByUsername(token, username) {
 
   return {
     user_id: String(firstDefined(user, ['user_id', 'userid', 'id']) || ''),
-    username: normalizeEmail(firstDefined(user, ['username']) || username),
+    username: normalize(firstDefined(user, ['username']) || username),
     firstname: String(firstDefined(user, ['first_name', 'firstname']) || ''),
     lastname: String(firstDefined(user, ['last_name', 'lastname']) || ''),
-    email: normalizeEmail(firstDefined(user, ['email']) || ''),
+    email: normalize(firstDefined(user, ['email']) || ''),
     managerid: String(firstDefined(user, ['manager_id', 'managerid']) || ''),
-    managerusername: normalizeEmail(firstDefined(user, ['manager_username', 'managerusername']) || ''),
-    canManageSubordinates: Boolean(firstDefined(user, ['can_manage_subordinates', 'canmanagesubordinates']))
+    managerusername: normalize(firstDefined(user, ['manager_username', 'managerusername']) || '')
   };
 }
 
@@ -115,9 +111,9 @@ async function getSubordinates(token, managerId) {
   const items = data?.data?.items || data?.items || [];
   return items.map(item => ({
     user_id: String(firstDefined(item, ['user_id', 'subordinate_id', 'userid']) || ''),
-    username: normalizeEmail(firstDefined(item, ['username', 'subordinate_username']) || ''),
+    username: normalize(firstDefined(item, ['username', 'subordinate_username']) || ''),
     fullname: String(firstDefined(item, ['fullname']) || ''),
-    email: normalizeEmail(firstDefined(item, ['email']) || '')
+    email: normalize(firstDefined(item, ['email']) || '')
   })).filter(x => x.user_id);
 }
 
@@ -135,24 +131,21 @@ function isPendingStatus(v) {
 
 function normalizePendingRow(row) {
   const courseId = String(firstDefined(row, ['course_id', 'id_course', 'id']) || '');
-  const courseName = String(firstDefined(row, ['course_name', 'name_course', 'course_title', 'title']) || 'Unknown course');
-
   return {
     user_id: String(firstDefined(row, ['user_id']) || ''),
-    username: normalizeEmail(firstDefined(row, ['username']) || ''),
+    username: normalize(firstDefined(row, ['username']) || ''),
     fullname: String(firstDefined(row, ['fullname']) || ''),
-    email: normalizeEmail(firstDefined(row, ['email']) || ''),
-    course_id: courseId,
-    course_name: courseName,
-    course_url: courseId ? `${DOCEBO_BASE_URL}/course/view/${encodeURIComponent(courseId)}` : '#',
+    email: normalize(firstDefined(row, ['email']) || ''),
+    course_name: String(firstDefined(row, ['course_name', 'name_course', 'course_title', 'title']) || 'Unknown course'),
     session_name: String(firstDefined(row, ['session_name', 'name_session']) || '-'),
     session_start: String(firstDefined(row, ['session_start', 'start_date']) || '-'),
     session_end: String(firstDefined(row, ['session_end', 'end_date']) || '-'),
-    enrollment_status: String(firstDefined(row, ['enrollment_status', 'status', 'state']) || '').toLowerCase()
+    enrollment_status: String(firstDefined(row, ['enrollment_status', 'status', 'state']) || '').toLowerCase(),
+    course_url: courseId ? `${DOCEBO_BASE_URL}/course/view/${encodeURIComponent(courseId)}` : '#'
   };
 }
 
-async function fetchDashboardData(token, currentUser) {
+async function fetchDashboard(token, currentUser) {
   const subordinates = await getSubordinates(token, currentUser.user_id);
   const subordinateIds = new Set(subordinates.map(s => String(s.user_id)));
   const subordinateMap = new Map(subordinates.map(s => [String(s.user_id), s]));
@@ -182,7 +175,7 @@ async function fetchDashboardData(token, currentUser) {
 
 app.get('/api/auth/bootstrap', async (req, res) => {
   try {
-    const username = normalizeEmail(req.query.username || req.query.user || '');
+    const username = normalize(req.query.username || req.query.user || '');
     const time = String(req.query.time || '').trim();
     const sig = String(req.query.sig || '').trim();
 
@@ -194,7 +187,7 @@ app.get('/api/auth/bootstrap', async (req, res) => {
       return res.status(500).json({ success: false, error: 'Missing BOOTSTRAP_SECRET' });
     }
 
-    const expected = bootstrapSig(username, time);
+    const expected = makeSig(username, time);
     const a = Buffer.from(sig);
     const b = Buffer.from(expected);
     if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
@@ -240,7 +233,7 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
     req.session.user = currentUser;
     req.session.doceboToken = token;
 
-    const dashboard = await fetchDashboardData(token, currentUser);
+    const dashboard = await fetchDashboard(token, currentUser);
     res.json({ success: true, ...dashboard });
   } catch (error) {
     console.error('dashboard error:', error.response?.data || error.message);
@@ -267,6 +260,4 @@ app.use((req, res) => {
   res.status(404).send('Not Found');
 });
 
-app.listen(PORT, () => {
-  console.log(`Server running on ${PORT}`);
-});
+app.listen(PORT, () => console.log(`Server running on ${PORT}`));
