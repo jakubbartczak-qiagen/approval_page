@@ -95,14 +95,22 @@ async function getUserByUsername(token, username) {
   const data = await doceboGet(token, `${DOCEBO_BASE_URL}/manage/v1/user`, { username });
   const user = data?.data?.user_data || data?.data || data || {};
 
+  const managerid = String(firstDefined(user, ['managerid', 'manager_id', 'managerId']) || '');
+  const managerusername = normalize(firstDefined(user, ['managerusername', 'manager_username', 'managerUserName']) || '');
+  const managerfirstname = String(firstDefined(user, ['managerfirstname', 'manager_first_name', 'managerFirstName']) || '');
+  const managerlastname = String(firstDefined(user, ['managerlastname', 'manager_last_name', 'managerLastName']) || '');
+
   return {
     user_id: String(firstDefined(user, ['user_id', 'userid', 'id']) || ''),
     username: normalize(firstDefined(user, ['username']) || username),
-    firstname: String(firstDefined(user, ['first_name', 'firstname']) || ''),
-    lastname: String(firstDefined(user, ['last_name', 'lastname']) || ''),
+    firstname: String(firstDefined(user, ['firstname', 'first_name']) || ''),
+    lastname: String(firstDefined(user, ['lastname', 'last_name']) || ''),
     email: normalize(firstDefined(user, ['email']) || ''),
-    managerid: String(firstDefined(user, ['manager_id', 'managerid']) || ''),
-    managerusername: normalize(firstDefined(user, ['manager_username', 'managerusername']) || '')
+    managerid,
+    managerusername,
+    managerfirstname,
+    managerlastname,
+    managerlabel: [managerfirstname, managerlastname].filter(Boolean).join(' ').trim() || managerusername || managerid || ''
   };
 }
 
@@ -172,6 +180,10 @@ async function fetchDashboard(token, currentUser) {
     items
   };
 }
+
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok' });
+});
 
 app.get('/api/auth/bootstrap', async (req, res) => {
   try {
@@ -249,16 +261,314 @@ app.post('/api/pending-items/:id/decline', requireAuth, async (req, res) => {
   res.json({ success: true });
 });
 
+const indexHtml = `<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>QIAlearn My Teams Trainings Approvals</title>
+  <style>
+    :root {
+      --bg: #eef2f7;
+      --card: #ffffff;
+      --line: #d8e0ea;
+      --text: #1f2d3d;
+      --muted: #6b7787;
+      --blue: #2457a6;
+      --blue-dark: #1b4483;
+      --red: #e11d48;
+      --shadow: 0 6px 18px rgba(20, 35, 60, 0.08);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    .wrap { max-width: 1320px; margin: 22px auto; padding: 0 18px 24px; }
+    .topbar {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      box-shadow: var(--shadow);
+      padding: 18px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .title h1 {
+      margin: 0 0 6px;
+      font-size: 28px;
+      font-weight: 700;
+      color: #16345f;
+    }
+    .title p { margin: 0; color: var(--muted); font-size: 14px; }
+    .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+    .btn {
+      border: 0;
+      border-radius: 8px;
+      padding: 9px 14px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    .btn.primary { background: var(--blue); color: #fff; }
+    .btn.primary:hover { background: var(--blue-dark); }
+    .btn.light { background: #f3f6fa; color: #334155; border: 1px solid var(--line); }
+    .stats { display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: 14px; margin-top: 16px; }
+    .stat {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      box-shadow: var(--shadow);
+      padding: 14px 16px;
+      min-height: 72px;
+      position: relative;
+      overflow: hidden;
+    }
+    .stat::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 5px;
+      height: 100%;
+      background: var(--blue);
+    }
+    .stat .label {
+      font-size: 11px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      margin-bottom: 8px;
+    }
+    .stat .value { font-size: 18px; font-weight: 700; word-break: break-word; }
+    .table-card {
+      margin-top: 14px;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    thead th {
+      background: #f6f8fb;
+      color: #4b5563;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: .03em;
+      text-align: left;
+      padding: 14px 12px;
+      border-bottom: 1px solid var(--line);
+    }
+    tbody td {
+      padding: 12px;
+      font-size: 13px;
+      border-bottom: 1px solid #edf1f5;
+      vertical-align: top;
+      word-break: break-word;
+    }
+    tbody tr:hover { background: #fafcff; }
+    .status {
+      display: inline-block;
+      background: #e9eff8;
+      color: #35568e;
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-weight: 700;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .link { color: var(--blue); text-decoration: none; font-weight: 700; white-space: nowrap; }
+    .link:hover { text-decoration: underline; }
+    .row-actions { display: grid; gap: 6px; }
+    .btn-approve, .btn-decline {
+      color: #fff;
+      border: 0;
+      border-radius: 7px;
+      padding: 8px 10px;
+      font-size: 13px;
+      cursor: pointer;
+      width: 100%;
+      font-weight: 700;
+    }
+    .btn-approve { background: var(--blue); }
+    .btn-decline { background: var(--red); }
+    .error {
+      background: #fff1f2;
+      color: #9f1239;
+      border: 1px solid #fecdd3;
+      padding: 12px 14px;
+      border-radius: 10px;
+      margin-top: 14px;
+      display: none;
+    }
+    .empty { padding: 24px; text-align: center; color: var(--muted); }
+    @media (max-width: 1100px) { .stats { grid-template-columns: 1fr; } table { table-layout: auto; } }
+    @media (max-width: 760px) { .topbar { flex-direction: column; align-items: flex-start; } .title h1 { font-size: 22px; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="topbar">
+      <div class="title">
+        <h1>QIAlearn My Teams Trainings Approvals</h1>
+        <p>Review and manage pending enrollment requests for your direct employees.</p>
+      </div>
+      <div class="actions">
+        <button class="btn primary" id="backBtn">Return to My Team Page</button>
+        <button class="btn light" id="refreshBtn">Refresh</button>
+      </div>
+    </div>
+
+    <div class="stats">
+      <div class="stat">
+        <div class="label">Manager</div>
+        <div class="value" id="managerValue">Loading...</div>
+      </div>
+      <div class="stat">
+        <div class="label">Direct Employees</div>
+        <div class="value" id="directEmployeesValue">-</div>
+      </div>
+      <div class="stat">
+        <div class="label">Pending Items</div>
+        <div class="value" id="pendingItemsValue">-</div>
+      </div>
+    </div>
+
+    <div class="error" id="errorBox"></div>
+
+    <div class="table-card">
+      <table>
+        <thead>
+          <tr>
+            <th style="width: 14%;">User</th>
+            <th style="width: 14%;">Email</th>
+            <th style="width: 20%;">Course</th>
+            <th style="width: 13%;">Session Name</th>
+            <th style="width: 10%;">Session Start</th>
+            <th style="width: 10%;">Session End</th>
+            <th style="width: 10%;">Status</th>
+            <th style="width: 9%;">Course Link</th>
+            <th style="width: 10%;">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="tbody">
+          <tr><td colspan="9" class="empty">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = 'https://TWOJ-RENDER-URL.onrender.com';
+    const el = id => document.getElementById(id);
+
+    async function api(path, options = {}) {
+      const res = await fetch(`${API_BASE}${path}`, {
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+        ...options
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      return data;
+    }
+
+    function escapeHtml(str) {
+      return String(str)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+    }
+
+    function renderDashboard(data) {
+      const manager = data.manager || {};
+      el('managerValue').textContent =
+        manager.managerlabel ||
+        manager.managerusername ||
+        manager.email ||
+        'Unavailable';
+      el('directEmployeesValue').textContent = data.directEmployees ?? 0;
+      el('pendingItemsValue').textContent = data.pendingItems ?? 0;
+
+      const items = data.items || [];
+      if (!items.length) {
+        el('tbody').innerHTML = '<tr><td colspan="9" class="empty">No pending items.</td></tr>';
+        return;
+      }
+
+      el('tbody').innerHTML = items.map((item, idx) => `
+        <tr>
+          <td>${escapeHtml(item.fullname || item.username || '-')}</td>
+          <td>${escapeHtml(item.email || '-')}</td>
+          <td>${escapeHtml(item.course_name || '-')}</td>
+          <td>${escapeHtml(item.session_name || '-')}</td>
+          <td>${escapeHtml(item.session_start || '-')}</td>
+          <td>${escapeHtml(item.session_end || '-')}</td>
+          <td><span class="status">${escapeHtml(item.enrollment_status || 'Pending Approval')}</span></td>
+          <td><a class="link" href="${item.course_url || '#'}" target="_blank" rel="noopener">Open course</a></td>
+          <td>
+            <div class="row-actions">
+              <button class="btn-approve" onclick="approveItem('${encodeURIComponent(item.user_id || idx)}')">Approve</button>
+              <button class="btn-decline" onclick="declineItem('${encodeURIComponent(item.user_id || idx)}')">Decline</button>
+            </div>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    async function loadDashboard() {
+      el('errorBox').style.display = 'none';
+      try {
+        const data = await api('/api/dashboard');
+        renderDashboard(data);
+      } catch (e) {
+        el('errorBox').textContent = e.message;
+        el('errorBox').style.display = 'block';
+        el('tbody').innerHTML = '<tr><td colspan="9" class="empty">Failed to load data.</td></tr>';
+        el('managerValue').textContent = 'Unavailable';
+      }
+    }
+
+    async function approveItem(id) {
+      try {
+        await api(`/api/pending-items/${id}/approve`, { method: 'POST', body: '{}' });
+        await loadDashboard();
+      } catch (e) {
+        alert(e.message);
+      }
+    }
+
+    async function declineItem(id) {
+      try {
+        await api(`/api/pending-items/${id}/decline`, { method: 'POST', body: '{}' });
+        await loadDashboard();
+      } catch (e) {
+        alert(e.message);
+      }
+    }
+
+    el('refreshBtn').addEventListener('click', loadDashboard);
+    el('backBtn').addEventListener('click', () => {
+      window.location.href = 'https://qiagen.docebosaas.com/';
+    });
+
+    loadDashboard();
+  </script>
+</body>
+</html>`;
+
 app.get(['/', '/index.html', '/approval_page/', '/approval_page/index.html'], (req, res) => {
-  res.sendFile(path.join(__dirname, 'index.html'));
+  res.type('html').send(indexHtml);
 });
-app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'ok' });
-});
+
 app.use((req, res) => {
   res.status(404).send('Not Found');
 });
 
-app.listen(PORT, () => {
-  console.log(`Server running on ${PORT}`);
-});
+app.listen(PORT, () => console.log(`Server running on ${PORT}`));
