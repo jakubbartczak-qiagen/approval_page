@@ -11,9 +11,10 @@ const toastContainer = document.getElementById('toastContainer');
 const returnBtn = document.getElementById('returnBtn');
 
 let currentManager = null;
+let currentUserId = null;
 
-const API_BASE = window.APP_CONFIG?.API_BASE || 'https://approval-page.onrender.com/';
-const RETURN_URL = window.APP_CONFIG?.RETURN_URL || 'https://qiagen.docebosaas.com/';
+const API_BASE = (window.APP_CONFIG?.API_BASE || 'https://approval-page.onrender.com/').replace(/\/$/, '');
+const RETURN_URL = window.APP_CONFIG?.RETURN_URL || 'https://qiagensandbox.docebosaas.com/';
 
 returnBtn.href = RETURN_URL;
 
@@ -87,6 +88,21 @@ function renderManager(manager) {
   managerUsernameEl.textContent = fullName;
 }
 
+function getQueryParam(name) {
+  const params = new URLSearchParams(window.location.search);
+  return params.get(name);
+}
+
+function resolveUserId() {
+  return (
+    window.APP_CONFIG?.USER_ID ||
+    getQueryParam('user_id') ||
+    getQueryParam('userId') ||
+    currentUserId ||
+    ''
+  ).trim();
+}
+
 async function apiGet(path) {
   const response = await fetch(`${API_BASE}${path}`, {
     credentials: 'include',
@@ -122,7 +138,40 @@ async function apiPost(path, body) {
   return data;
 }
 
+async function bootstrapSession() {
+  const userId = resolveUserId();
+  if (!userId) {
+    throw new Error('Missing user_id');
+  }
+
+  currentUserId = userId;
+
+  const response = await fetch(
+    `${API_BASE}/api/auth/bootstrap?user_id=${encodeURIComponent(userId)}`,
+    {
+      method: 'GET',
+      credentials: 'include',
+      headers: { Accept: 'application/json' }
+    }
+  );
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok || !data.success) {
+    throw new Error(typeof data.error === 'string' ? data.error : 'Bootstrap failed');
+  }
+
+  currentManager = data.user;
+  renderManager(currentManager);
+  return data;
+}
+
 async function loadCurrentUser() {
+  if (!currentManager) {
+    await bootstrapSession();
+    return;
+  }
+
   const data = await apiGet('/api/me');
   currentManager = data.user;
   renderManager(currentManager);
@@ -168,6 +217,8 @@ async function loadTable() {
 
   try {
     if (!currentManager) {
+      await bootstrapSession();
+    } else {
       await loadCurrentUser();
     }
 
