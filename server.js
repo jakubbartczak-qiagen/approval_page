@@ -241,6 +241,21 @@ async function denyEnrollment(token, { courseId, sessionId, userId }) {
 
 app.get('/health', (req, res) => res.json({ ok: true }));
 
+app.get('/sso/:username', (req, res) => {
+  try {
+    const username = normalize(req.params.username);
+    if (!username) return res.status(400).send('Missing username');
+
+    const time = Math.floor(Date.now() / 1000).toString();
+    const sig = makeSig(username, time);
+
+    const url = `/api/auth/bootstrap?username=${encodeURIComponent(username)}&time=${encodeURIComponent(time)}&sig=${encodeURIComponent(sig)}`;
+    return res.redirect(url);
+  } catch (error) {
+    console.error('sso generator error:', error.message);
+    return res.status(500).send('Failed to generate signed url');
+  }
+});
 app.get('/api/auth/bootstrap', async (req, res) => {
   try {
     const { username, time, sig } = bootstrapFromRequest(req);
