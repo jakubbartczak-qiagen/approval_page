@@ -78,8 +78,14 @@ function buildCourseUrl(courseId, courseSlug) {
 }
 
 app.set('trust proxy', 1);
-app.use(cors({ origin: FRONTEND_ORIGIN, credentials: true }));
+
+app.use(cors({
+  origin: FRONTEND_ORIGIN,
+  credentials: true
+}));
+
 app.use(express.json());
+
 app.use(session({
   secret: required('SESSION_SECRET'),
   resave: false,
@@ -306,10 +312,18 @@ app.get('/api/auth/bootstrap', async (req, res) => {
 
     const token = await loginToDocebo();
     const user = await getUserByUsername(token, username);
+
     req.session.user = user;
     req.session.username = username;
     req.session.doceboToken = token;
-    req.session.save(() => res.redirect('/'));
+
+    req.session.save(err => {
+      if (err) {
+        console.error('session save error:', err);
+        return res.status(500).json({ success: false, error: 'Session save failed' });
+      }
+      return res.redirect('/');
+    });
   } catch (error) {
     console.error('bootstrap error:', error.response?.data || error.message);
     res.status(500).json({ success: false, error: 'Failed to bootstrap session' });
