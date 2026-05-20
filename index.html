@@ -5,6 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>QIAlearn My Teams Trainings Approvals</title>
   <link rel="stylesheet" href="./styles.css" />
+
+  <script>
+    window.APP_CONFIG = {
+      API_BASE: 'https://approval-page.onrender.com',
+      RETURN_URL: 'https://qiagen.docebosaas.com/',
+      USER_ID: '12345'
+    };
+  </script>
 </head>
 <body>
   <div class="page">
@@ -66,14 +74,6 @@
   </div>
 
   <div id="toastContainer" class="toast-container"></div>
-
-  <script>
-    window.APP_CONFIG = {
-      API_BASE: 'https://approval-page.onrender.com',
-      RETURN_URL: 'https://qiagen.docebosaas.com/',
-      USER_ID: '12345'
-    };
-  </script>
   <script src="./app.js"></script>
 </body>
 </html>
