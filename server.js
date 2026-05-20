@@ -4,8 +4,8 @@ const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
 const session = require('express-session');
-const path = require('path');
 const crypto = require('crypto');
+const path = require('path');
 
 const app = express();
 
@@ -249,15 +249,14 @@ app.post('/api/pending-items/:id/decline', requireAuth, async (req, res) => {
   res.json({ success: true });
 });
 
-const publicDir = path.join(__dirname, 'public');
-app.use(express.static(publicDir));
-
 app.get(['/', '/index.html', '/approval_page/', '/approval_page/index.html'], (req, res) => {
-  res.sendFile(path.join(publicDir, 'index.html'));
+  res.sendFile(path.join(__dirname, 'index.html'));
 });
 
 app.use((req, res) => {
   res.status(404).send('Not Found');
 });
 
-app.listen(PORT, () => console.log(`Server running on ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`Server running on ${PORT}`);
+});
