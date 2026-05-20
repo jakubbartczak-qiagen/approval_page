@@ -29,7 +29,6 @@
     }
     .approve { background: #1f8f4a; color: white; }
     .deny { background: #c62828; color: white; }
-    .row { display: flex; gap: 12px; flex-wrap: wrap; }
     .item {
       border: 1px solid #e5e5e5;
       border-radius: 10px;
@@ -74,12 +73,25 @@
       return data;
     }
 
+    function escapeHtml(s) {
+      return String(s || "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function escapeJs(s) {
+      return String(s || "").replaceAll("\\", "\\\\").replaceAll("'", "\\'");
+    }
+
     async function loadMe() {
       const data = await api("/api/me");
       const u = data.user || {};
       userEl.innerHTML = `
-        <strong>${u.firstname || ""} ${u.lastname || ""}</strong><br>
-        <span class="muted">${u.username || ""}</span>
+        <strong>${escapeHtml((u.firstname || "") + " " + (u.lastname || "")).trim()}</strong><br>
+        <span class="muted">${escapeHtml(u.username || "")}</span>
       `;
       return u;
     }
@@ -94,7 +106,7 @@
       }
 
       itemsEl.innerHTML = items.map(item => `
-        <div class="item" data-course-id="${item.course_id}" data-session-id="${item.session_id}" data-user-id="${item.user_id}">
+        <div class="item">
           <div><strong>${escapeHtml(item.course_name || "Unknown course")}</strong></div>
           <div class="muted">User: ${escapeHtml(item.fullname || item.username || "")}</div>
           <div class="muted">Email: ${escapeHtml(item.email || "")}</div>
@@ -107,19 +119,6 @@
           </div>
         </div>
       `).join("");
-    }
-
-    function escapeHtml(s) {
-      return String(s || "")
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;")
-        .replaceAll("'", "&#039;");
-    }
-
-    function escapeJs(s) {
-      return String(s || "").replaceAll("\\", "\\\\").replaceAll("'", "\\'");
     }
 
     async function approveItem(courseId, sessionId, userId) {
