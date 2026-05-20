@@ -14,7 +14,7 @@ const NODE_ENV = process.env.NODE_ENV || 'development';
 const IS_PROD = NODE_ENV === 'production';
 
 const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || 'https://jakubbartczak-qiagen.github.io';
-const DOCEBO_BASE_URL = (process.env.DOCEBO_BASE_URL || '').replace(/\/$/, '');
+const DOCEBO_BASE_URL = (process.env.DOCEBO_BASE_URL || process.env.DOCEBO_BASE_URL || '').replace(/\/$/, '');
 const BOOTSTRAP_SECRET = process.env.BOOTSTRAP_SECRET || '';
 
 function required(name) {
@@ -41,6 +41,22 @@ function parseCsv(value) {
 
 function makeSig(username, time) {
   return crypto.createHmac('sha256', BOOTSTRAP_SECRET).update(`${username}|${time}`).digest('hex');
+}
+
+function bootstrapFromRequest(req) {
+  const username = normalize(req.query.username || req.query.user || req.query.u || '');
+  const time = String(req.query.time || req.query.ts || '').trim();
+  const sig = String(req.query.sig || req.query.s || '').trim();
+  return { username, time, sig };
+}
+
+function verifyBootstrap({ username, time, sig }) {
+  if (!BOOTSTRAP_SECRET || !username || !time || !sig) return false;
+  const expected = makeSig(username, time);
+  const a = Buffer.from(sig);
+  const b = Buffer.from(expected);
+  const now = Math.floor(Date.now() / 1000);
+  return a.length === b.length && crypto.timingSafeEqual(a, b) && Math.abs(now - Number(time)) <= 300;
 }
 
 function isPendingStatus(v) {
@@ -125,7 +141,6 @@ async function doceboDelete(token, url) {
 async function getUserByUsername(token, username) {
   const data = await doceboGet(token, `${DOCEBO_BASE_URL}/manage/v1/user`, { username });
   const user = data?.data?.user_data || data?.data || data || {};
-
   const managerid = String(firstDefined(user, ['managerid', 'manager_id', 'managerId']) || '');
   const managerusername = normalize(firstDefined(user, ['managerusername', 'manager_username', 'managerUserName']) || '');
   const managerfirstname = String(firstDefined(user, ['managerfirstname', 'manager_first_name', 'managerFirstName']) || '');
@@ -134,7 +149,7 @@ async function getUserByUsername(token, username) {
   return {
     user_id: String(firstDefined(user, ['user_id', 'userid', 'id']) || ''),
     username: normalize(firstDefined(user, ['username']) || username),
-    firstname: String(firstDefined(user, ['firstname', 'first_name']) || ''),
+    firstname: String(firstDefined(user, ['firstname', 'first_name', 'fullname', 'name']) || ''),
     lastname: String(firstDefined(user, ['lastname', 'last_name']) || ''),
     email: normalize(firstDefined(user, ['email']) || ''),
     managerid,
@@ -157,10 +172,7 @@ async function getSubordinates(token, managerId) {
 }
 
 async function getPendingUsers(token) {
-  const data = await doceboGet(token, `${DOCEBO_BASE_URL}/learn/v1/enrollment/pending_users`, {
-    page: 1,
-    page_size: 200
-  });
+  const data = await doceboGet(token, `${DOCEBO_BASE_URL}/learn/v1/enrollment/pending_users`, { page: 1, page_size: 200 });
   return data?.data?.items || data?.items || [];
 }
 
@@ -231,37 +243,15 @@ app.get('/health', (req, res) => res.json({ ok: true }));
 
 app.get('/api/auth/bootstrap', async (req, res) => {
   try {
-    const username = normalize(req.query.username || req.query.user || '');
-    const time = String(req.query.time || '').trim();
-    const sig = String(req.query.sig || '').trim();
-
-    if (!username || !time || !sig) {
-      return res.status(400).json({ success: false, error: 'Missing username, time or sig' });
-    }
-
-    if (!BOOTSTRAP_SECRET) {
-      return res.status(500).json({ success: false, error: 'Missing BOOTSTRAP_SECRET' });
-    }
-
-    const expected = makeSig(username, time);
-    const a = Buffer.from(sig);
-    const b = Buffer.from(expected);
-    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
-      return res.status(403).json({ success: false, error: 'Invalid signature' });
-    }
-
-    const now = Math.floor(Date.now() / 1000);
-    if (Math.abs(now - Number(time)) > 300) {
-      return res.status(403).json({ success: false, error: 'Expired link' });
-    }
+    const { username, time, sig } = bootstrapFromRequest(req);
+    if (!username || !time || !sig) return res.status(400).json({ success: false, error: 'Missing username, time or sig' });
+    if (!verifyBootstrap({ username, time, sig })) return res.status(403).json({ success: false, error: 'Invalid signature or expired link' });
 
     const token = await loginToDocebo();
     const user = await getUserByUsername(token, username);
-
     req.session.user = user;
     req.session.username = username;
     req.session.doceboToken = token;
-
     req.session.save(() => res.redirect('/'));
   } catch (error) {
     console.error('bootstrap error:', error.response?.data || error.message);
@@ -269,8 +259,31 @@ app.get('/api/auth/bootstrap', async (req, res) => {
   }
 });
 
-app.get('/api/me', requireAuth, async (req, res) => {
+app.get('/launch', async (req, res) => {
   try {
+    const { username, time, sig } = bootstrapFromRequest(req);
+    if (!username || !time || !sig) return res.status(400).send('Missing bootstrap parameters');
+    return res.redirect(`/api/auth/bootstrap?username=${encodeURIComponent(username)}&time=${encodeURIComponent(time)}&sig=${encodeURIComponent(sig)}`);
+  } catch (error) {
+    return res.status(500).send('Launch failed');
+  }
+});
+
+app.get('/api/me', async (req, res) => {
+  try {
+    if (!req.session?.user) {
+      const { username, time, sig } = bootstrapFromRequest(req);
+      if (verifyBootstrap({ username, time, sig })) {
+        const token = await loginToDocebo();
+        const user = await getUserByUsername(token, username);
+        req.session.user = user;
+        req.session.username = username;
+        req.session.doceboToken = token;
+        return req.session.save(() => res.json({ success: true, user }));
+      }
+      return res.status(401).json({ success: false, error: 'Not authenticated' });
+    }
+
     const token = req.session.doceboToken || await loginToDocebo();
     const fresh = await getUserByUsername(token, req.session.username || req.session.user.username);
     req.session.user = fresh;
@@ -282,8 +295,28 @@ app.get('/api/me', requireAuth, async (req, res) => {
   }
 });
 
-app.get('/api/pending-items', requireAuth, async (req, res) => {
+app.get('/api/pending-items', async (req, res) => {
   try {
+    if (!req.session?.user) {
+      const { username, time, sig } = bootstrapFromRequest(req);
+      if (verifyBootstrap({ username, time, sig })) {
+        const token = await loginToDocebo();
+        const user = await getUserByUsername(token, username);
+        req.session.user = user;
+        req.session.username = username;
+        req.session.doceboToken = token;
+        return req.session.save(async () => {
+          try {
+            const dashboard = await fetchDashboard(token, user);
+            res.json({ success: true, ...dashboard });
+          } catch (e) {
+            res.status(500).json({ success: false, error: 'Failed to load pending items' });
+          }
+        });
+      }
+      return res.status(401).json({ success: false, error: 'Not authenticated' });
+    }
+
     const token = req.session.doceboToken || await loginToDocebo();
     const currentUser = await getUserByUsername(token, req.session.username || req.session.user.username);
     req.session.user = currentUser;
@@ -300,14 +333,10 @@ app.get('/api/pending-items', requireAuth, async (req, res) => {
 app.post('/api/approve', requireAuth, async (req, res) => {
   try {
     const { courseId, sessionId, userId } = req.body || {};
-    if (!courseId || !userId) {
-      return res.status(400).json({ success: false, error: 'courseId and userId are required' });
-    }
-
+    if (!courseId || !userId) return res.status(400).json({ success: false, error: 'courseId and userId are required' });
     const token = req.session.doceboToken || await loginToDocebo();
     await approveEnrollment(token, { courseId, sessionId, userId });
     req.session.doceboToken = token;
-
     res.json({ success: true, message: 'Enrollment approved successfully.' });
   } catch (error) {
     console.error('approve error:', error.response?.data || error.message);
@@ -318,14 +347,10 @@ app.post('/api/approve', requireAuth, async (req, res) => {
 app.post('/api/deny', requireAuth, async (req, res) => {
   try {
     const { courseId, sessionId, userId } = req.body || {};
-    if (!courseId || !userId) {
-      return res.status(400).json({ success: false, error: 'courseId and userId are required' });
-    }
-
+    if (!courseId || !userId) return res.status(400).json({ success: false, error: 'courseId and userId are required' });
     const token = req.session.doceboToken || await loginToDocebo();
     await denyEnrollment(token, { courseId, sessionId, userId });
     req.session.doceboToken = token;
-
     res.json({ success: true, message: 'Enrollment declined successfully.' });
   } catch (error) {
     console.error('deny error:', error.response?.data || error.message);
@@ -334,6 +359,7 @@ app.post('/api/deny', requireAuth, async (req, res) => {
 });
 
 app.use(express.static(__dirname));
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
 app.listen(PORT, () => console.log(`Backend running on port ${PORT}`));
