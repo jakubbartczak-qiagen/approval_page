@@ -36,7 +36,10 @@ function firstDefined(obj, keys) {
 }
 
 function parseCsv(value) {
-  return String(value || '').split(',').map(v => v.trim()).filter(Boolean);
+  return String(value || '')
+    .split(',')
+    .map(v => v.trim())
+    .filter(Boolean);
 }
 
 function makeSig(username, time) {
@@ -44,10 +47,11 @@ function makeSig(username, time) {
 }
 
 function bootstrapFromRequest(req) {
-  const username = normalize(req.query.username || '');
-  const time = String(req.query.time || '').trim();
-  const sig = String(req.query.sig || '').trim();
-  return { username, time, sig };
+  return {
+    username: normalize(req.query.username || ''),
+    time: String(req.query.time || '').trim(),
+    sig: String(req.query.sig || '').trim()
+  };
 }
 
 function verifyBootstrap({ username, time, sig }) {
@@ -78,8 +82,14 @@ function buildCourseUrl(courseId, courseSlug) {
 }
 
 app.set('trust proxy', 1);
-app.use(cors({ origin: FRONTEND_ORIGIN, credentials: true }));
+
+app.use(cors({
+  origin: FRONTEND_ORIGIN,
+  credentials: true
+}));
+
 app.use(express.json());
+
 app.use(session({
   secret: required('SESSION_SECRET'),
   resave: false,
@@ -313,9 +323,10 @@ app.get('/api/auth/bootstrap', async (req, res) => {
 
     req.session.save(err => {
       if (err) {
+        console.error('session save error:', err);
         return res.status(500).json({ success: false, error: 'Session save failed' });
       }
-      res.json({ success: true, user });
+      return res.json({ success: true, user });
     });
   } catch (error) {
     console.error('bootstrap error:', error.response?.data || error.message);
@@ -326,15 +337,6 @@ app.get('/api/auth/bootstrap', async (req, res) => {
 app.get('/api/me', async (req, res) => {
   try {
     if (!req.session?.user) {
-      const { username, time, sig } = bootstrapFromRequest(req);
-      if (verifyBootstrap({ username, time, sig })) {
-        const token = await loginToDocebo();
-        const user = await getUserByUsername(token, username);
-        req.session.user = user;
-        req.session.username = username;
-        req.session.doceboToken = token;
-        return req.session.save(() => res.json({ success: true, user }));
-      }
       return res.status(401).json({ success: false, error: 'Not authenticated' });
     }
 
@@ -342,7 +344,13 @@ app.get('/api/me', async (req, res) => {
     const fresh = await getUserByUsername(token, req.session.username || req.session.user.username);
     req.session.user = fresh;
     req.session.doceboToken = token;
-    res.json({ success: true, user: fresh });
+
+    req.session.save(err => {
+      if (err) {
+        console.error('session save error:', err);
+      }
+      res.json({ success: true, user: fresh });
+    });
   } catch (error) {
     console.error('me error:', error.response?.data || error.message);
     res.status(500).json({ success: false, error: 'Failed to load current user' });
@@ -352,22 +360,6 @@ app.get('/api/me', async (req, res) => {
 app.get('/api/pending-items', async (req, res) => {
   try {
     if (!req.session?.user) {
-      const { username, time, sig } = bootstrapFromRequest(req);
-      if (verifyBootstrap({ username, time, sig })) {
-        const token = await loginToDocebo();
-        const user = await getUserByUsername(token, username);
-        req.session.user = user;
-        req.session.username = username;
-        req.session.doceboToken = token;
-        return req.session.save(async () => {
-          try {
-            const dashboard = await fetchDashboard(token, user);
-            res.json({ success: true, ...dashboard });
-          } catch (e) {
-            res.status(500).json({ success: false, error: 'Failed to load pending items' });
-          }
-        });
-      }
       return res.status(401).json({ success: false, error: 'Not authenticated' });
     }
 
@@ -377,7 +369,13 @@ app.get('/api/pending-items', async (req, res) => {
     req.session.doceboToken = token;
 
     const dashboard = await fetchDashboard(token, currentUser);
-    res.json({ success: true, ...dashboard });
+
+    req.session.save(err => {
+      if (err) {
+        console.error('session save error:', err);
+      }
+      res.json({ success: true, ...dashboard });
+    });
   } catch (error) {
     console.error('pending-items error:', error.response?.data || error.message);
     res.status(500).json({ success: false, error: 'Failed to load pending items' });
@@ -413,6 +411,7 @@ app.post('/api/deny', requireAuth, async (req, res) => {
 });
 
 app.use(express.static(__dirname));
+
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
