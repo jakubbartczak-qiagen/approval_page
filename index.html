@@ -1,71 +1,26 @@
-<!DOCTYPE html>
-<html lang="en">
+<!doctype html>
+<html lang="pl">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>QIAlearn My Teams Trainings Approvals</title>
-  <link rel="stylesheet" href="./styles.css" />
+  <title>Aplikacja</title>
 </head>
 <body>
-  <div class="page">
-    <header class="header">
-      <div class="header-copy">
-        <h1>QIAlearn My Teams Trainings Approvals</h1>
-        <p class="subtitle">Review and manage pending training enrollment requests for your direct employees.</p>
-      </div>
+  <h1>Moja aplikacja</h1>
+  <pre id="me">Ładowanie...</pre>
 
-      <div class="header-actions">
-        <a class="btn btn-link-primary" href="#" id="returnBtn">Return to My Team Page</a>
-        <button id="refreshBtn" class="btn btn-secondary" type="button">Refresh</button>
-      </div>
-    </header>
-
-    <section class="summary">
-      <article class="summary-card">
-        <span class="summary-label">Manager</span>
-        <strong id="managerUsername">-</strong>
-      </article>
-
-      <article class="summary-card">
-        <span class="summary-label">Direct Employees</span>
-        <strong id="subordinatesCount">0</strong>
-      </article>
-
-      <article class="summary-card">
-        <span class="summary-label">Pending Items</span>
-        <strong id="pendingCount">0</strong>
-      </article>
-    </section>
-
-    <div id="messageBox" class="message hidden"></div>
-    <div id="loadingBox" class="panel hidden">Loading pending approvals...</div>
-    <div id="emptyState" class="panel hidden">No pending approvals found for this manager.</div>
-
-    <section id="tableWrapper" class="table-wrapper hidden">
-      <table>
-        <thead>
-          <tr>
-            <th>User</th>
-            <th>Email</th>
-            <th>Course</th>
-            <th>Session Name</th>
-            <th>Session Start</th>
-            <th>Session End</th>
-            <th>Status</th>
-            <th>Course Link</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody id="tableBody"></tbody>
-      </table>
-    </section>
-
-    <footer class="page-footer">
-      <div class="page-footer-text">Manager approval dashboard</div>
-    </footer>
-  </div>
-
-  <div id="toastContainer" class="toast-container"></div>
-  <script src="./app.js"></script>
+  <script>
+    fetch("/api/me", { credentials: "include" })
+      .then(async r => {
+        if (!r.ok) throw new Error("Brak sesji");
+        return r.json();
+      })
+      .then(data => {
+        document.getElementById("me").textContent = JSON.stringify(data, null, 2);
+      })
+      .catch(err => {
+        document.getElementById("me").textContent = "Nie zalogowano: " + err.message;
+      });
+  </script>
 </body>
 </html>
