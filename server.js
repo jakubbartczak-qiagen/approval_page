@@ -154,16 +154,34 @@ async function searchUsers(token, params = {}) {
 
 async function getUserById(token, userId) {
 
-  const users = await searchUsers(
+  console.log(
+    'LOOKING FOR USER ID:',
+    userId
+  );
+
+  const response = await doceboGet(
     token,
+    `${DOCEBO_BASE_URL}/manage/v1/user`,
     {
-      page_size: 200
+      page: 1,
+      page_size: 2000
     }
   );
 
   console.log(
-    'SEARCHING USER ID:',
-    userId
+    'FULL USER RESPONSE:',
+    JSON.stringify(response)
+  );
+
+  const users =
+    response?.data?.items
+    || response?.data?.users
+    || response?.users
+    || [];
+
+  console.log(
+    'TOTAL USERS:',
+    users.length
   );
 
   const exact = users.find(
@@ -176,7 +194,7 @@ async function getUserById(token, userId) {
   );
 
   console.log(
-    'FOUND USER:',
+    'MATCHED USER:',
     exact
   );
 
