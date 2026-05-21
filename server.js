@@ -369,6 +369,36 @@ app.get('/health', (req, res) => {
   });
 });
 
+app.get('/debug/me', async (req, res) => {
+
+  try {
+
+    const token = await loginToDocebo();
+
+    const response = await axios.get(
+      `${DOCEBO_BASE_URL}/manage/v1/user/me`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      }
+    );
+
+    res.json(response.data);
+  }
+  catch (error) {
+
+    res.status(500).json({
+
+      success: false,
+
+      error: error.message,
+
+      details: error.response?.data || null
+    });
+  }
+});
+
 app.get('/launch', async (req, res) => {
 
   try {
