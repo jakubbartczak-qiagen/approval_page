@@ -43,31 +43,33 @@ function makeSig(username, time) {
   return crypto.createHmac('sha256', BOOTSTRAP_SECRET).update(`${username}|${time}`).digest('hex');
 }
 
-function bootstrapFromRequest(req) {
-  const username = normalize(
-    req.query.username ||
-    req.query.user ||
-    req.query.u ||
-    req.body?.username ||
-    req.body?.user ||
-    req.body?.u ||
-    ''
-  );
-  const time = String(req.query.time || req.query.ts || req.body?.time || req.body?.ts || '').trim();
-  const sig = String(req.query.sig || req.query.s || req.body?.sig || req.body?.s || '').trim();
+function getPayload(req) {
+  return {
+    ...req.query,
+    ...(req.body && typeof req.body === 'object' ? req.body : {})
+  };
+}
+
+function extractBootstrapParams(req) {
+  const payload = getPayload(req);
+  const username = normalize(firstDefined(payload, ['username', 'user', 'u']) || '');
+  const time = String(firstDefined(payload, ['time', 'ts']) || '').trim();
+  const sig = String(firstDefined(payload, ['sig', 's']) || '').trim();
   return { username, time, sig };
 }
 
-function extractUserId(req) {
-  return String(
-    req.query.user_id ||
-    req.query.userId ||
-    req.body?.user_id ||
-    req.body?.userId ||
-    req.body?.user?.id ||
-    req.body?.user?.user_id ||
-    ''
-  ).trim();
+function extractLaunchParams(req) {
+  const payload = getPayload(req);
+  const user_id = String(firstDefined(payload, ['user_id', 'userId']) || '').trim();
+  const username = normalize(firstDefined(payload, ['username', 'user', 'u']) || '');
+  const auth_code = String(firstDefined(payload, ['auth_code', 'authCode']) || '').trim();
+  const hash = String(firstDefined(payload, ['hash']) || '').trim();
+  const course_id = String(firstDefined(payload, ['course_id', 'courseId']) || '').trim();
+  const course_code = String(firstDefined(payload, ['course_code', 'courseCode']) || '').trim();
+  const time = String(firstDefined(payload, ['time', 'ts']) || '').trim();
+  const sig = String(firstDefined(payload, ['sig', 's']) || '').trim();
+
+  return { user_id, username, auth_code, hash, course_id, course_code, time, sig };
 }
 
 function verifyBootstrap({ username, time, sig }) {
@@ -105,6 +107,7 @@ app.use(cors({
 }));
 
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 app.use(session({
   secret: required('SESSION_SECRET'),
@@ -348,6 +351,11 @@ async function denyEnrollment(token, { courseId, sessionId, userId }) {
   await doceboDelete(token, url);
 }
 
+function extractUserId(req) {
+  const payload = getPayload(req);
+  return String(firstDefined(payload, ['user_id', 'userId']) || '').trim();
+}
+
 async function bootstrapSessionFromUsername(req, username) {
   const token = await loginToDocebo();
   const user = await getUserByUsername(token, username);
@@ -393,14 +401,19 @@ app.get('/sso/:username', (req, res) => {
 
 app.get('/launch', async (req, res) => {
   try {
-    const userId = extractUserId(req);
+    const { user_id, username, auth_code, hash } = extractLaunchParams(req);
 
-    if (userId) {
-      await bootstrapSessionFromUserId(req, userId);
-      return res.redirect(`/?user_id=${encodeURIComponent(userId)}`);
+    if (user_id) {
+      await bootstrapSessionFromUserId(req, user_id);
+      return res.redirect(`/?user_id=${encodeURIComponent(user_id)}`);
     }
 
-    const { username, time, sig } = bootstrapFromRequest(req);
+    if (username && auth_code && hash) {
+      await bootstrapSessionFromUsername(req, username);
+      return res.redirect(`/?username=${encodeURIComponent(username)}`);
+    }
+
+    const { time, sig } = extractBootstrapParams(req);
     if (username && time && sig && verifyBootstrap({ username, time, sig })) {
       await bootstrapSessionFromUsername(req, username);
       return res.redirect('/');
@@ -408,7 +421,7 @@ app.get('/launch', async (req, res) => {
 
     return res.status(400).json({
       success: false,
-      error: 'Missing user_id or valid signed bootstrap parameters'
+      error: 'Missing Docebo launch payload or valid signed bootstrap parameters'
     });
   } catch (error) {
     console.error('launch error:', error.response?.data || error.message);
@@ -419,16 +432,21 @@ app.get('/launch', async (req, res) => {
   }
 });
 
-app.get('/api/auth/bootstrap', async (req, res) => {
+app.all('/api/auth/bootstrap', async (req, res) => {
   try {
-    const userId = extractUserId(req);
+    const { user_id, username, auth_code, hash } = extractLaunchParams(req);
 
-    if (userId) {
-      const { user } = await bootstrapSessionFromUserId(req, userId);
+    if (user_id) {
+      const { user } = await bootstrapSessionFromUserId(req, user_id);
       return res.json({ success: true, user });
     }
 
-    const { username, time, sig } = bootstrapFromRequest(req);
+    if (username && auth_code && hash) {
+      const { user } = await bootstrapSessionFromUsername(req, username);
+      return res.json({ success: true, user });
+    }
+
+    const { time, sig } = extractBootstrapParams(req);
     if (!username || !time || !sig) {
       return res.status(400).json({ success: false, error: 'Missing user_id or username, time, sig' });
     }
