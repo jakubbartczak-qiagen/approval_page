@@ -11,10 +11,9 @@ const toastContainer = document.getElementById('toastContainer');
 const returnBtn = document.getElementById('returnBtn');
 
 let currentManager = null;
-let currentUserId = null;
 
-const API_BASE = (window.APP_CONFIG?.API_BASE || 'https://approval-page.onrender.com/').replace(/\/$/, '');
-const RETURN_URL = window.APP_CONFIG?.RETURN_URL || 'https://qiagensandbox.docebosaas.com/';
+const API_BASE = (window.APP_CONFIG?.API_BASE || 'https://approval-page.onrender.com').replace(/\/$/, '');
+const RETURN_URL = window.APP_CONFIG?.RETURN_URL || 'https://qiagen.docebosaas.com/';
 
 returnBtn.href = RETURN_URL;
 
@@ -98,7 +97,6 @@ function resolveUserId() {
     window.APP_CONFIG?.USER_ID ||
     getQueryParam('user_id') ||
     getQueryParam('userId') ||
-    currentUserId ||
     ''
   ).trim();
 }
@@ -144,8 +142,6 @@ async function bootstrapSession() {
     throw new Error('Missing user_id');
   }
 
-  currentUserId = userId;
-
   const response = await fetch(
     `${API_BASE}/api/auth/bootstrap?user_id=${encodeURIComponent(userId)}`,
     {
@@ -167,11 +163,6 @@ async function bootstrapSession() {
 }
 
 async function loadCurrentUser() {
-  if (!currentManager) {
-    await bootstrapSession();
-    return;
-  }
-
   const data = await apiGet('/api/me');
   currentManager = data.user;
   renderManager(currentManager);
