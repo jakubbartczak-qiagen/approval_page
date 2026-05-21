@@ -178,17 +178,25 @@ async function getSubordinates(token, managerId) {
 
 async function getPendingUsers(token) {
 
+  console.log('LOADING PENDING ENROLLMENTS...');
+
   const response = await doceboGet(
     token,
-    `${DOCEBO_BASE_URL}/learn/v1/enrollment/pending_users`,
+    `${DOCEBO_BASE_URL}/learn/v1/enrollments/pending`,
     {
       page: 1,
       page_size: 200
     }
   );
 
+  console.log(
+    'PENDING RESPONSE:',
+    JSON.stringify(response)
+  );
+
   return (
     response?.data?.items
+    || response?.items
     || []
   );
 }
