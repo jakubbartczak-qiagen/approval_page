@@ -131,16 +131,52 @@ function mapUser(user = {}) {
   };
 }
 
+async function getUserById(token, userId) {
+
+  console.log('GET USER BY ID:', userId);
+
+  try {
+
+    const response = await doceboGet(
+      token,
+      `${DOCEBO_BASE_URL}/manage/v1/user/${userId}`
+    );
+
+    console.log(
+      'USER BY ID RESPONSE:',
+      JSON.stringify(response)
+    );
+
+    const user =
+      response?.data?.user_data
+      || response?.data
+      || response
+      || {};
+
+    return mapUser(user);
+
+  }
+  catch (error) {
+
+    console.log(
+      'GET USER BY ID FAILED:',
+      error.response?.data || error.message
+    );
+
+    return {};
+  }
+}
+
 async function searchUsers(token, params = {}) {
 
   const response = await doceboGet(
     token,
-    `${DOCEBO_BASE_URL}/manage/v1/users`,
+    `${DOCEBO_BASE_URL}/manage/v1/user`,
     params
   );
 
   console.log(
-    'USER SEARCH RESPONSE:',
+    'SEARCH USERS RESPONSE:',
     JSON.stringify(response)
   );
 
@@ -148,13 +184,14 @@ async function searchUsers(token, params = {}) {
     response?.data?.items
     || response?.data?.users
     || response?.users
+    || response?.data
     || []
   );
 }
 
-async function getUserById(token, userId) {
+async function getUserByUsername(token, username) {
 
-  console.log('SEARCHING USER:', userId);
+  console.log('SEARCH USERNAME:', username);
 
   let page = 1;
 
@@ -164,10 +201,11 @@ async function getUserById(token, userId) {
 
     const response = await doceboGet(
       token,
-      `${DOCEBO_BASE_URL}/manage/v1/users`,
+      `${DOCEBO_BASE_URL}/manage/v1/user`,
       {
         page,
-        page_size: 50
+        page_size: 50,
+        search_text: username
       }
     );
 
@@ -175,25 +213,25 @@ async function getUserById(token, userId) {
       response?.data?.items
       || response?.data?.users
       || response?.users
+      || response?.data
       || [];
 
     console.log(
-      `PAGE ${page} USERS:`,
+      `PAGE ${page} RESULTS:`,
       users.length
     );
 
     const found = users.find(
       u =>
-        String(
-          u.user_id
-          || u.id
-          || ''
-        ) === String(userId)
+        normalize(u.username) === normalize(username)
     );
 
     if (found) {
 
-      console.log('FOUND USER:', found);
+      console.log(
+        'FOUND USER:',
+        JSON.stringify(found)
+      );
 
       return mapUser(found);
     }
@@ -204,90 +242,38 @@ async function getUserById(token, userId) {
         || 0
       );
 
-    if (page >= totalPages) {
+    if (!totalPages || page >= totalPages) {
       break;
     }
 
     page++;
   }
 
-  console.log('USER NOT FOUND');
+  console.log('USERNAME NOT FOUND');
 
   return {};
 }
-async function getUserByUsername(token, username) {
 
-  const users = await searchUsers(
-    token,
-    { search_text: username }
-  );
-
-  const exact = users.find(
-    u => normalize(u.username) === normalize(username)
-  );
-
-  return mapUser(exact || users[0] || {});
-}
-
-```javascript
 async function getSubordinates(token, managerId) {
 
   console.log('GET SUBORDINATES FOR:', managerId);
 
-  let page = 1;
-
-  let allUsers = [];
-
-  while (page <= 500) {
-
-    const response = await doceboGet(
-      token,
-      `${DOCEBO_BASE_URL}/manage/v1/users`,
-      {
-        page,
-        page_size: 200
-      }
-    );
-
-    const users =
-      response?.data?.items
-      || [];
-
-    allUsers.push(...users);
-
-    const totalPages =
-      Number(
-        response?.data?.total_page_count
-        || 0
-      );
-
-    if (page >= totalPages) {
-      break;
-    }
-
-    page++;
-  }
-
-  console.log(
-    'TOTAL USERS LOADED:',
-    allUsers.length
-  );
-
-  const subordinates = allUsers.filter(
-    u =>
-      String(
-        u.manager_id
-        || u.managerid
-        || ''
-      ) === String(managerId)
+  const response = await doceboGet(
+    token,
+    `${DOCEBO_BASE_URL}/manage/v1/managers/${managerId}/subordinates`
   );
 
   console.log(
-    'SUBORDINATES FOUND:',
-    subordinates.length
+    'SUBORDINATES RESPONSE:',
+    JSON.stringify(response)
   );
 
-  return subordinates.map(item => ({
+  const items =
+    response?.data?.items
+    || response?.items
+    || [];
+
+  return items.map(item => ({
 
     user_id: String(item.user_id || ''),
 
@@ -462,6 +448,37 @@ app.get('/debug/launch', (req, res) => {
   });
 });
 
+app.get('/debug/users', async (req, res) => {
+
+  try {
+
+    const token = await loginToDocebo();
+
+    const response = await doceboGet(
+      token,
+      `${DOCEBO_BASE_URL}/manage/v1/user`,
+      {
+        page: 1,
+        page_size: 50
+      }
+    );
+
+    return res.json(response);
+
+  }
+  catch (error) {
+
+    return res.status(500).json({
+
+      success: false,
+
+      error: error.message,
+
+      details: error.response?.data || null
+    });
+  }
+});
+
 app.get('/launch', async (req, res) => {
 
   try {
@@ -469,6 +486,8 @@ app.get('/launch', async (req, res) => {
     console.log('================ LAUNCH START ================');
 
     console.log('QUERY:', req.query);
+
+    req.session.destroy(() => {});
 
     const userId = String(
       req.query.user_id || ''
@@ -502,16 +521,13 @@ app.get('/launch', async (req, res) => {
 
     if (userId) {
 
-      console.log('GET USER BY ID...');
-
       user = await getUserById(
         token,
         userId
       );
     }
-    else {
 
-      console.log('GET USER BY USERNAME...');
+    if ((!user || !user.user_id) && username) {
 
       user = await getUserByUsername(
         token,
@@ -520,11 +536,11 @@ app.get('/launch', async (req, res) => {
     }
 
     console.log(
-      'USER RESPONSE:',
+      'FINAL USER:',
       JSON.stringify(user)
     );
 
-    if (!user.user_id) {
+    if (!user || !user.user_id) {
 
       return res.status(404).json({
 
@@ -564,8 +580,6 @@ app.get('/launch', async (req, res) => {
 
     console.log('SESSION SAVED');
 
-    console.log('REDIRECTING...');
-
     return res.redirect(`/?t=${Date.now()}`);
 
   }
@@ -580,7 +594,7 @@ app.get('/launch', async (req, res) => {
 
     console.log(
       'ERROR RESPONSE:',
-      error.response?.data
+      JSON.stringify(error.response?.data)
     );
 
     console.log(
@@ -761,37 +775,6 @@ app.get('/', (req, res) => {
   res.sendFile(
     path.join(__dirname, 'index.html')
   );
-});
-
-app.get('/debug/users', async (req, res) => {
-
-  try {
-
-    const token = await loginToDocebo();
-
-    const response = await doceboGet(
-      token,
-      `${DOCEBO_BASE_URL}/manage/v1/users`,
-      {
-        page: 1,
-        page_size: 50
-      }
-    );
-
-    return res.json(response);
-
-  }
-  catch (error) {
-
-    return res.status(500).json({
-
-      success: false,
-
-      error: error.message,
-
-      details: error.response?.data || null
-    });
-  }
 });
 
 app.listen(PORT, () => {
