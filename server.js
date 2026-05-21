@@ -339,7 +339,49 @@ app.get('/launch', async (req, res) => {
     return res.status(500).send('Launch failed');
   }
 });
+async function bootstrapSessionFromUsername(req, res, username) {
+  const token = await loginToDocebo();
+  const user = await getUserByUsername(token, username);
 
+  req.session.user = user;
+  req.session.username = username;
+  req.session.doceboToken = token;
+
+  return new Promise((resolve, reject) => {
+    req.session.save(err => {
+      if (err) return reject(err);
+      resolve({ token, user });
+    });
+  });
+}
+
+app.get('/launch', async (req, res) => {
+  try {
+    const { username, time, sig } = bootstrapFromRequest(req);
+
+    if (username && time && sig && verifyBootstrap({ username, time, sig })) {
+      await bootstrapSessionFromUsername(req, res, username);
+      return res.redirect('/');
+    }
+
+    const fallbackUser = String(req.query.user_id || req.query.userId || '').trim();
+    if (fallbackUser) {
+      await bootstrapSessionFromUsername(req, res, fallbackUser);
+      return res.redirect('/');
+    }
+
+    return res.status(400).json({
+      success: false,
+      error: 'Missing username, time or sig'
+    });
+  } catch (error) {
+    console.error('launch error:', error.response?.data || error.message);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to launch session'
+    });
+  }
+});
 app.get('/api/me', async (req, res) => {
   try {
     if (!req.session?.user) {
