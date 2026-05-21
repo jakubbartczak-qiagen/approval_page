@@ -93,12 +93,7 @@ function getQueryParam(name) {
 }
 
 function resolveUserId() {
-  return (
-    window.APP_CONFIG?.USER_ID ||
-    getQueryParam('user_id') ||
-    getQueryParam('userId') ||
-    ''
-  ).trim();
+  return getQueryParam('user_id') || getQueryParam('userId') || '';
 }
 
 async function apiGet(path) {
