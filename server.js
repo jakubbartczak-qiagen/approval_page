@@ -154,53 +154,67 @@ async function searchUsers(token, params = {}) {
 
 async function getUserById(token, userId) {
 
-  console.log(
-    'LOOKING FOR USER ID:',
-    userId
-  );
+  console.log('SEARCHING USER:', userId);
 
-  const response = await doceboGet(
-    token,
-    `${DOCEBO_BASE_URL}/manage/v1/user`,
-    {
-      page: 1,
-      page_size: 2000
+  let page = 1;
+
+  while (page <= 500) {
+
+    console.log('CHECK PAGE:', page);
+
+    const response = await doceboGet(
+      token,
+      `${DOCEBO_BASE_URL}/manage/v1/users`,
+      {
+        page,
+        page_size: 50
+      }
+    );
+
+    const users =
+      response?.data?.items
+      || response?.data?.users
+      || response?.users
+      || [];
+
+    console.log(
+      `PAGE ${page} USERS:`,
+      users.length
+    );
+
+    const found = users.find(
+      u =>
+        String(
+          u.user_id
+          || u.id
+          || ''
+        ) === String(userId)
+    );
+
+    if (found) {
+
+      console.log('FOUND USER:', found);
+
+      return mapUser(found);
     }
-  );
 
-  console.log(
-    'FULL USER RESPONSE:',
-    JSON.stringify(response)
-  );
+    const totalPages =
+      Number(
+        response?.data?.total_page_count
+        || 0
+      );
 
-  const users =
-    response?.data?.items
-    || response?.data?.users
-    || response?.users
-    || [];
+    if (page >= totalPages) {
+      break;
+    }
 
-  console.log(
-    'TOTAL USERS:',
-    users.length
-  );
+    page++;
+  }
 
-  const exact = users.find(
-    u =>
-      String(
-        u.user_id
-        || u.id
-        || ''
-      ) === String(userId)
-  );
+  console.log('USER NOT FOUND');
 
-  console.log(
-    'MATCHED USER:',
-    exact
-  );
-
-  return mapUser(exact || {});
+  return {};
 }
-
 async function getUserByUsername(token, username) {
 
   const users = await searchUsers(
