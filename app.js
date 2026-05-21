@@ -96,6 +96,25 @@ function resolveUserId() {
   return getQueryParam('user_id') || getQueryParam('userId') || '';
 }
 
+function resolveUsername() {
+  return getQueryParam('username') || getQueryParam('user') || getQueryParam('u') || '';
+}
+
+function resolveDebugMode() {
+  return getQueryParam('debug') === '1' || getQueryParam('debug') === 'true';
+}
+
+function setDiagnosticState(text) {
+  showMessage(text, 'error');
+  showToast(text, 'error');
+  setLoading(false);
+  setEmpty(true);
+  setTableVisible(false);
+  pendingCountEl.textContent = '0';
+  subordinatesCountEl.textContent = '0';
+  managerUsernameEl.textContent = '-';
+}
+
 async function apiGet(path) {
   const response = await fetch(`${API_BASE}${path}`, {
     credentials: 'include',
@@ -131,20 +150,32 @@ async function apiPost(path, body) {
   return data;
 }
 
-async function bootstrapSession() {
+function buildBootstrapUrl() {
   const userId = resolveUserId();
-  if (!userId) {
-    throw new Error('Missing user_id');
+  const username = resolveUsername();
+
+  if (userId) {
+    return `${API_BASE}/api/auth/bootstrap?user_id=${encodeURIComponent(userId)}`;
   }
 
-  const response = await fetch(
-    `${API_BASE}/api/auth/bootstrap?user_id=${encodeURIComponent(userId)}`,
-    {
-      method: 'GET',
-      credentials: 'include',
-      headers: { Accept: 'application/json' }
-    }
-  );
+  if (username) {
+    return `${API_BASE}/api/auth/bootstrap?username=${encodeURIComponent(username)}`;
+  }
+
+  return '';
+}
+
+async function bootstrapSession() {
+  const url = buildBootstrapUrl();
+  if (!url) {
+    throw new Error('Missing Docebo payload in URL');
+  }
+
+  const response = await fetch(url, {
+    method: 'GET',
+    credentials: 'include',
+    headers: { Accept: 'application/json' }
+  });
 
   const data = await response.json().catch(() => ({}));
 
@@ -220,6 +251,7 @@ async function loadTable() {
 
     if (items.length === 0) {
       setEmpty(true);
+      showMessage('No pending approvals found for this manager.', 'success');
       return;
     }
 
@@ -229,8 +261,22 @@ async function loadTable() {
     tableBody.appendChild(fragment);
     setTableVisible(true);
   } catch (error) {
-    showMessage(`Load error: ${error.message}`, 'error');
-    showToast(`Load error: ${error.message}`, 'error');
+    const msg = String(error.message || 'Unknown error');
+
+    if (msg.includes('Missing Docebo payload')) {
+      setDiagnosticState('Brak payloadu z Docebo. Aplikacja została otwarta poza launcherem albo Docebo nie przekazało user context.');
+      return;
+    }
+
+    if (msg.includes('Not authenticated')) {
+      setDiagnosticState('Brak sesji. Najpierw musi przyjść poprawny launch z Docebo.');
+      return;
+    }
+
+    showMessage(`Load error: ${msg}`, 'error');
+    showToast(`Load error: ${msg}`, 'error');
+    setEmpty(true);
+    setTableVisible(false);
   } finally {
     setLoading(false);
   }
@@ -254,5 +300,19 @@ async function handleDecision(action, courseId, sessionId, userId, rowEl) {
   }
 }
 
+async function showLaunchDiagnostics() {
+  if (!resolveDebugMode()) return;
+
+  try {
+    const data = await fetch(`${API_BASE}/debug/launch${window.location.search}`, {
+      credentials: 'include',
+      headers: { Accept: 'application/json' }
+    }).then(r => r.json());
+
+    console.log('launch diagnostics:', data);
+  } catch (e) {}
+}
+
 refreshBtn.addEventListener('click', loadTable);
+showLaunchDiagnostics();
 loadTable();
