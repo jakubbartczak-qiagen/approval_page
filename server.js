@@ -117,10 +117,12 @@ function mapUser(user = {}) {
 
     firstname:
       user.firstname
+      || user.first_name
       || '',
 
     lastname:
       user.lastname
+      || user.last_name
       || '',
 
     email: normalize(
@@ -131,116 +133,158 @@ function mapUser(user = {}) {
 
 async function getUserById(token, userId) {
 
-  console.log('GET USER BY ID:', userId);
+  console.log('SEARCHING USER ID:', userId);
 
-  const response = await doceboGet(
-    token,
-    `${DOCEBO_BASE_URL}/manage/v1/user/${userId}`
-  );
+  let page = 1;
 
-  console.log(
-    'USER RESPONSE:',
-    JSON.stringify(response)
-  );
+  while (page <= 500) {
 
-  const user =
-    response?.data?.user_data
-    || response?.data
-    || {};
-
-  return mapUser(user);
-}
-
-async function getSubordinates(token, managerId) {
-
-  const response = await doceboGet(
-    token,
-    `${DOCEBO_BASE_URL}/manage/v1/managers/${managerId}/subordinates`
-  );
-
-  const items =
-    response?.data?.items
-    || [];
-
-  return items.map(item => ({
-
-    user_id: String(item.user_id || ''),
-
-    username: normalize(item.username || ''),
-
-    fullname:
-      item.fullname
-      || `${item.firstname || ''} ${item.lastname || ''}`.trim(),
-
-    email: normalize(item.email || '')
-  }));
-}
-
-async function getPendingUsers(token) {
-
-  console.log('================ PENDING USERS ================');
-
-  const endpoints = [
-
-    '/learn/v1/enrollments/pending',
-
-    '/learn/v1/enrollment/pending_users',
-
-    '/manage/v1/enrollments/pending'
-  ];
-
-  for (const endpoint of endpoints) {
+    console.log('CHECK PAGE:', page);
 
     try {
 
-      console.log('TRY ENDPOINT:', endpoint);
-
       const response = await doceboGet(
         token,
-        `${DOCEBO_BASE_URL}${endpoint}`,
+        `${DOCEBO_BASE_URL}/manage/v1/users`,
         {
-          page: 1,
+          page,
           page_size: 200
         }
       );
 
-      console.log(
-        'SUCCESS ENDPOINT:',
-        endpoint
-      );
-
-      console.log(
-        JSON.stringify(response)
-      );
-
-      return (
+      const users =
         response?.data?.items
-        || response?.items
-        || []
+        || response?.data?.users
+        || response?.users
+        || [];
+
+      console.log(
+        `PAGE ${page} -> ${users.length} USERS`
       );
+
+      const found = users.find(
+        u =>
+          String(
+            u.user_id
+            || u.id
+            || ''
+          ) === String(userId)
+      );
+
+      if (found) {
+
+        console.log('FOUND USER:', found);
+
+        return mapUser(found);
+      }
+
+      const totalPages = Number(
+        response?.data?.total_page_count
+        || 0
+      );
+
+      if (!totalPages || page >= totalPages) {
+        break;
+      }
+
+      page++;
     }
-    catch (error) {
+    catch (err) {
 
       console.log(
-        'FAILED ENDPOINT:',
-        endpoint
+        'PAGE ERROR:',
+        page,
+        err.response?.data || err.message
       );
 
-      console.log(
-        'STATUS:',
-        error.response?.status
-      );
-
-      console.log(
-        'DATA:',
-        JSON.stringify(error.response?.data)
-      );
+      break;
     }
   }
 
-  throw new Error(
-    'No pending enrollment endpoint works'
-  );
+  console.log('USER NOT FOUND');
+
+  return null;
+}
+
+async function getSubordinates(token, managerId) {
+
+  console.log('GET SUBORDINATES:', managerId);
+
+  try {
+
+    const response = await doceboGet(
+      token,
+      `${DOCEBO_BASE_URL}/manage/v1/managers/${managerId}/subordinates`
+    );
+
+    console.log(
+      'SUBORDINATES RESPONSE:',
+      JSON.stringify(response)
+    );
+
+    const items =
+      response?.data?.items
+      || response?.items
+      || [];
+
+    return items.map(item => ({
+
+      user_id: String(item.user_id || ''),
+
+      username: normalize(item.username || ''),
+
+      fullname:
+        item.fullname
+        || `${item.firstname || ''} ${item.lastname || ''}`.trim(),
+
+      email: normalize(item.email || '')
+    }));
+  }
+  catch (error) {
+
+    console.log(
+      'SUBORDINATES ERROR:',
+      error.response?.data || error.message
+    );
+
+    return [];
+  }
+}
+
+async function getPendingUsers(token) {
+
+  console.log('GET PENDING USERS');
+
+  try {
+
+    const response = await doceboGet(
+      token,
+      `${DOCEBO_BASE_URL}/learn/v1/enrollment/pending_users`,
+      {
+        page: 1,
+        page_size: 200
+      }
+    );
+
+    console.log(
+      'PENDING USERS OK'
+    );
+
+    return (
+      response?.data?.items
+      || response?.items
+      || []
+    );
+  }
+  catch (error) {
+
+    console.log(
+      'PENDING USERS ERROR:',
+      JSON.stringify(error.response?.data)
+    );
+
+    return [];
+  }
 }
 
 function buildCourseUrl(courseId, slug) {
@@ -369,100 +413,43 @@ app.get('/health', (req, res) => {
   });
 });
 
-app.get('/debug/me', async (req, res) => {
+app.get('/debug/iframe', (req, res) => {
+
+  res.json({
+
+    query: req.query,
+
+    url: req.originalUrl,
+
+    headers: {
+
+      referer: req.headers.referer,
+
+      host: req.headers.host,
+
+      'sec-fetch-dest': req.headers['sec-fetch-dest']
+    }
+  });
+});
+
+app.get('/debug/users', async (req, res) => {
 
   try {
 
     const token = await loginToDocebo();
 
-    const response = await axios.get(
-      `${DOCEBO_BASE_URL}/manage/v1/user/me`,
+    const response = await doceboGet(
+      token,
+      `${DOCEBO_BASE_URL}/manage/v1/users`,
       {
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
+        page: 1,
+        page_size: 50
       }
     );
 
-    res.json(response.data);
+    return res.json(response);
   }
   catch (error) {
-
-    res.status(500).json({
-
-      success: false,
-
-      error: error.message,
-
-      details: error.response?.data || null
-    });
-  }
-});
-
-app.get('/launch', async (req, res) => {
-
-  try {
-
-    console.log('============== LAUNCH ==============');
-
-    req.session.user = null;
-
-    req.session.user_id = null;
-
-    req.session.doceboToken = null;
-
-    const token = await loginToDocebo();
-
-    console.log('TOKEN OK');
-
-    // TEMPORARY TEST USER
-    // później podmienimy na SSO/header/current user
-
-    const user = await getUserById(
-      token,
-      '43600'
-    );
-
-    console.log(
-      'USER:',
-      JSON.stringify(user)
-    );
-
-    if (!user.user_id) {
-
-      return res.status(404).json({
-
-        success: false,
-
-        error: 'User not found'
-      });
-    }
-
-    req.session.user = user;
-
-    req.session.user_id = user.user_id;
-
-    req.session.doceboToken = token;
-
-    await new Promise((resolve, reject) => {
-
-      req.session.save(err => {
-
-        if (err) {
-          reject(err);
-        }
-        else {
-          resolve();
-        }
-      });
-    });
-
-    return res.redirect('/');
-
-  }
-  catch (error) {
-
-    console.log(error);
 
     return res.status(500).json({
 
@@ -481,26 +468,34 @@ app.get('/launch', async (req, res) => {
 
     console.log('================ LAUNCH START ================');
 
-    console.log('QUERY:', req.query);
+    console.log('RAW QUERY:', req.query);
 
-    req.session.user = null;
-    req.session.user_id = null;
+    const rawUserId = req.query.user_id;
 
-    const userId = String(
-      req.query.user_id || ''
-    ).trim();
+    console.log('RAW USER ID:', rawUserId);
 
-    if (!userId) {
+    if (
+      !rawUserId
+      || rawUserId === '[user_id]'
+      || rawUserId === '{user_id}'
+    ) {
 
       return res.status(400).json({
 
         success: false,
 
-        error: 'Missing user_id from Docebo'
+        error:
+          'Docebo did not replace user_id placeholder'
       });
     }
 
+    const userId = String(rawUserId).trim();
+
+    console.log('FINAL USER ID:', userId);
+
     const token = await loginToDocebo();
+
+    console.log('TOKEN OK');
 
     const user = await getUserById(
       token,
@@ -508,11 +503,11 @@ app.get('/launch', async (req, res) => {
     );
 
     console.log(
-      'FINAL USER:',
+      'FOUND USER:',
       JSON.stringify(user)
     );
 
-    if (!user.user_id) {
+    if (!user || !user.user_id) {
 
       return res.status(404).json({
 
@@ -541,21 +536,17 @@ app.get('/launch', async (req, res) => {
       });
     });
 
-    return res.redirect(`/?t=${Date.now()}`);
+    console.log('SESSION SAVED');
 
+    return res.redirect(`/?t=${Date.now()}`);
   }
   catch (error) {
 
-    console.log('=============== LAUNCH ERROR ===============');
+    console.log('LAUNCH ERROR');
 
     console.log(
-      'ERROR MESSAGE:',
-      error.message
-    );
-
-    console.log(
-      'ERROR RESPONSE:',
-      JSON.stringify(error.response?.data)
+      error.response?.data
+      || error.message
     );
 
     return res.status(500).json({
@@ -589,7 +580,6 @@ app.get('/api/me', async (req, res) => {
 
       user: req.session.user
     });
-
   }
   catch (error) {
 
@@ -627,7 +617,6 @@ app.get('/api/pending-items', async (req, res) => {
 
       ...dashboard
     });
-
   }
   catch (error) {
 
@@ -667,7 +656,6 @@ app.post('/api/approve', async (req, res) => {
 
       message: 'Enrollment approved successfully.'
     });
-
   }
   catch (error) {
 
@@ -707,7 +695,6 @@ app.post('/api/deny', async (req, res) => {
 
       message: 'Enrollment declined successfully.'
     });
-
   }
   catch (error) {
 
