@@ -371,14 +371,78 @@ app.get('/health', (req, res) => {
 
 app.get('/launch', async (req, res) => {
 
-  return res.json({
+  try {
 
-    raw_query: req.query,
+    console.log('============== LAUNCH ==============');
 
-    raw_url: req.originalUrl,
+    req.session.user = null;
 
-    headers: req.headers
-  });
+    req.session.user_id = null;
+
+    req.session.doceboToken = null;
+
+    const token = await loginToDocebo();
+
+    console.log('TOKEN OK');
+
+    // TEMPORARY TEST USER
+    // później podmienimy na SSO/header/current user
+
+    const user = await getUserById(
+      token,
+      '43600'
+    );
+
+    console.log(
+      'USER:',
+      JSON.stringify(user)
+    );
+
+    if (!user.user_id) {
+
+      return res.status(404).json({
+
+        success: false,
+
+        error: 'User not found'
+      });
+    }
+
+    req.session.user = user;
+
+    req.session.user_id = user.user_id;
+
+    req.session.doceboToken = token;
+
+    await new Promise((resolve, reject) => {
+
+      req.session.save(err => {
+
+        if (err) {
+          reject(err);
+        }
+        else {
+          resolve();
+        }
+      });
+    });
+
+    return res.redirect('/');
+
+  }
+  catch (error) {
+
+    console.log(error);
+
+    return res.status(500).json({
+
+      success: false,
+
+      error: error.message,
+
+      details: error.response?.data || null
+    });
+  }
 });
 
 app.get('/launch', async (req, res) => {
