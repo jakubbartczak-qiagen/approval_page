@@ -4,6 +4,7 @@ const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
 const session = require('express-session');
+const crypto = require('crypto');
 const path = require('path');
 
 const app = express();
@@ -14,6 +15,7 @@ const IS_PROD = NODE_ENV === 'production';
 
 const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || 'https://jakubbartczak-qiagen.github.io';
 const DOCEBO_BASE_URL = (process.env.DOCEBO_BASE_URL || '').replace(/\/$/, '');
+const BOOTSTRAP_SECRET = process.env.BOOTSTRAP_SECRET || '';
 
 function required(name) {
   const value = process.env[name];
@@ -34,10 +36,35 @@ function firstDefined(obj, keys) {
 }
 
 function parseCsv(value) {
-  return String(value || '')
-    .split(',')
-    .map(v => v.trim())
-    .filter(Boolean);
+  return String(value || '').split(',').map(v => v.trim()).filter(Boolean);
+}
+
+function makeSig(username, time) {
+  return crypto.createHmac('sha256', BOOTSTRAP_SECRET).update(`${username}|${time}`).digest('hex');
+}
+
+function bootstrapFromRequest(req) {
+  const username = normalize(req.query.username || req.query.user || req.query.u || '');
+  const time = String(req.query.time || req.query.ts || '').trim();
+  const sig = String(req.query.sig || req.query.s || '').trim();
+  return { username, time, sig };
+}
+
+function verifyBootstrap({ username, time, sig }) {
+  if (!BOOTSTRAP_SECRET || !username || !time || !sig) return false;
+
+  const expected = makeSig(username, time);
+  const a = Buffer.from(sig);
+  const b = Buffer.from(expected);
+  const now = Math.floor(Date.now() / 1000);
+
+  return a.length === b.length &&
+    crypto.timingSafeEqual(a, b) &&
+    Math.abs(now - Number(time)) <= 300;
+}
+
+function isPendingStatus(v) {
+  return ['to_confirm', 'waiting', 'pending', 'pending approval'].includes(String(v || '').toLowerCase());
 }
 
 function normalizeStatus(value) {
@@ -46,10 +73,6 @@ function normalizeStatus(value) {
   if (['confirmed', 'approved', 'enrolled', 'subscribed'].includes(raw)) return 'confirmed';
   if (['denied', 'rejected'].includes(raw)) return 'denied';
   return raw || 'to_confirm';
-}
-
-function isPendingStatus(v) {
-  return ['to_confirm', 'waiting', 'pending', 'pending approval'].includes(String(v || '').toLowerCase());
 }
 
 function buildCourseUrl(courseId, courseSlug) {
@@ -139,6 +162,38 @@ async function doceboDelete(token, url) {
   return response.data;
 }
 
+async function findUserIdByUsername(token, username) {
+  const queries = [
+    { username },
+    { search_text: username },
+    { q: username }
+  ];
+
+  for (const params of queries) {
+    try {
+      const data = await doceboGet(token, `${DOCEBO_BASE_URL}/manage/v1/user`, params);
+      const candidates = data?.data?.items || data?.data?.users || data?.items || data?.users || [];
+
+      if (Array.isArray(candidates) && candidates.length) {
+        const exact = candidates.find(u => normalize(firstDefined(u, ['username']) || '') === normalize(username));
+        const chosen = exact || candidates[0];
+        const id = String(firstDefined(chosen, ['user_id', 'userid', 'id']) || '');
+        if (id) return { user_id: id, raw: chosen };
+      }
+
+      const direct = data?.data?.user_data || data?.data || data || {};
+      const id = String(firstDefined(direct, ['user_id', 'userid', 'id']) || '');
+      const directUsername = normalize(firstDefined(direct, ['username']) || '');
+
+      if (id && (!directUsername || directUsername === normalize(username))) {
+        return { user_id: id, raw: direct };
+      }
+    } catch (e) {}
+  }
+
+  return { user_id: '', raw: {} };
+}
+
 async function findUserById(token, userId) {
   const id = String(userId || '').trim();
   if (!id) return {};
@@ -156,20 +211,18 @@ async function findUserById(token, userId) {
   }
 }
 
-async function getUserById(token, userId) {
-  const user = await findUserById(token, userId);
-
+function mapUser(user, fallback = {}) {
   const managerid = String(firstDefined(user, ['managerid', 'manager_id', 'managerId']) || '');
   const managerusername = normalize(firstDefined(user, ['managerusername', 'manager_username', 'managerUserName']) || '');
   const managerfirstname = String(firstDefined(user, ['managerfirstname', 'manager_first_name', 'managerFirstName']) || '');
   const managerlastname = String(firstDefined(user, ['managerlastname', 'manager_last_name', 'managerLastName']) || '');
 
   return {
-    user_id: String(firstDefined(user, ['user_id', 'userid', 'id']) || userId || ''),
-    username: normalize(firstDefined(user, ['username']) || ''),
-    firstname: String(firstDefined(user, ['firstname', 'first_name']) || ''),
-    lastname: String(firstDefined(user, ['lastname', 'last_name']) || ''),
-    email: normalize(firstDefined(user, ['email']) || ''),
+    user_id: String(firstDefined(user, ['user_id', 'userid', 'id']) || fallback.user_id || ''),
+    username: normalize(firstDefined(user, ['username']) || fallback.username || ''),
+    firstname: String(firstDefined(user, ['firstname', 'first_name']) || fallback.firstname || ''),
+    lastname: String(firstDefined(user, ['lastname', 'last_name']) || fallback.lastname || ''),
+    email: normalize(firstDefined(user, ['email']) || fallback.email || ''),
     managerid,
     managerusername,
     managerfirstname,
@@ -178,34 +231,40 @@ async function getUserById(token, userId) {
   };
 }
 
-async function getSubordinates(token, managerId) {
-  const data = await doceboGet(
-    token,
-    `${DOCEBO_BASE_URL}/manage/v1/managers/${encodeURIComponent(managerId)}/subordinates`
-  );
+async function getUserByUsername(token, username) {
+  const found = await findUserIdByUsername(token, username);
+  let user = found.raw || {};
 
+  if (found.user_id) {
+    const byId = await findUserById(token, found.user_id);
+    if (Object.keys(byId).length) user = byId;
+  }
+
+  return mapUser(user, { username, user_id: found.user_id });
+}
+
+async function getUserById(token, userId) {
+  const user = await findUserById(token, userId);
+  return mapUser(user, { user_id: String(userId || '').trim() });
+}
+
+async function getSubordinates(token, managerId) {
+  const data = await doceboGet(token, `${DOCEBO_BASE_URL}/manage/v1/managers/${encodeURIComponent(managerId)}/subordinates`);
   const items = data?.data?.items || data?.items || [];
 
-  return items
-    .map(item => ({
-      user_id: String(firstDefined(item, ['user_id', 'subordinate_id', 'userid']) || ''),
-      username: normalize(firstDefined(item, ['username', 'subordinate_username']) || ''),
-      fullname: String(
-        firstDefined(item, ['fullname', 'subordinate_fullname']) ||
-          `${firstDefined(item, ['firstname', 'subordinate_firstname']) || ''} ${firstDefined(item, ['lastname', 'subordinate_lastname']) || ''}`.trim()
-      ),
-      email: normalize(firstDefined(item, ['email', 'subordinate_email']) || '')
-    }))
-    .filter(x => x.user_id);
+  return items.map(item => ({
+    user_id: String(firstDefined(item, ['user_id', 'subordinate_id', 'userid']) || ''),
+    username: normalize(firstDefined(item, ['username', 'subordinate_username']) || ''),
+    fullname: String(
+      firstDefined(item, ['fullname', 'subordinate_fullname']) ||
+      `${firstDefined(item, ['firstname', 'subordinate_firstname']) || ''} ${firstDefined(item, ['lastname', 'subordinate_lastname']) || ''}`.trim()
+    ),
+    email: normalize(firstDefined(item, ['email', 'subordinate_email']) || '')
+  })).filter(x => x.user_id);
 }
 
 async function getPendingUsers(token) {
-  const data = await doceboGet(
-    token,
-    `${DOCEBO_BASE_URL}/learn/v1/enrollment/pending_users`,
-    { page: 1, page_size: 200 }
-  );
-
+  const data = await doceboGet(token, `${DOCEBO_BASE_URL}/learn/v1/enrollment/pending_users`, { page: 1, page_size: 200 });
   return data?.data?.items || data?.items || [];
 }
 
@@ -273,16 +332,25 @@ async function denyEnrollment(token, { courseId, sessionId, userId }) {
   await doceboDelete(token, url);
 }
 
+async function bootstrapSessionFromUsername(req, username) {
+  const token = await loginToDocebo();
+  const user = await getUserByUsername(token, username);
+
+  req.session.user = user;
+  req.session.user_id = user.user_id || '';
+  req.session.username = user.username || username;
+  req.session.doceboToken = token;
+
+  await saveSession(req);
+  return { token, user };
+}
+
 async function bootstrapSessionFromUserId(req, userId) {
   const token = await loginToDocebo();
   const user = await getUserById(token, userId);
 
-  if (!user?.user_id) {
-    throw new Error('User not found');
-  }
-
   req.session.user = user;
-  req.session.user_id = user.user_id;
+  req.session.user_id = user.user_id || String(userId || '').trim();
   req.session.username = user.username || '';
   req.session.doceboToken = token;
 
@@ -292,19 +360,45 @@ async function bootstrapSessionFromUserId(req, userId) {
 
 app.get('/health', (req, res) => res.json({ ok: true }));
 
+app.get('/sso/:username', (req, res) => {
+  try {
+    const username = normalize(req.params.username);
+    if (!username) return res.status(400).send('Missing username');
+
+    const time = Math.floor(Date.now() / 1000).toString();
+    const sig = makeSig(username, time);
+    const url = `/api/auth/bootstrap?username=${encodeURIComponent(username)}&time=${encodeURIComponent(time)}&sig=${encodeURIComponent(sig)}`;
+    return res.redirect(url);
+  } catch (error) {
+    console.error('sso generator error:', error.message);
+    return res.status(500).send('Failed to generate signed url');
+  }
+});
+
 app.get('/launch', async (req, res) => {
   try {
     const userId = String(req.query.user_id || req.query.userId || '').trim();
-
-    if (!userId) {
-      return res.status(400).json({ success: false, error: 'Missing user_id' });
+    if (userId) {
+      await bootstrapSessionFromUserId(req, userId);
+      return res.redirect(`/?user_id=${encodeURIComponent(userId)}`);
     }
 
-    await bootstrapSessionFromUserId(req, userId);
-    return res.redirect(`/?user_id=${encodeURIComponent(userId)}`);
+    const { username, time, sig } = bootstrapFromRequest(req);
+    if (username && time && sig && verifyBootstrap({ username, time, sig })) {
+      await bootstrapSessionFromUsername(req, username);
+      return res.redirect('/');
+    }
+
+    return res.status(400).json({
+      success: false,
+      error: 'Missing user_id or valid signed bootstrap parameters'
+    });
   } catch (error) {
     console.error('launch error:', error.response?.data || error.message);
-    return res.status(500).json({ success: false, error: 'Failed to launch session' });
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to launch session'
+    });
   }
 });
 
@@ -312,11 +406,21 @@ app.get('/api/auth/bootstrap', async (req, res) => {
   try {
     const userId = String(req.query.user_id || req.query.userId || '').trim();
 
-    if (!userId) {
-      return res.status(400).json({ success: false, error: 'Missing user_id' });
+    if (userId) {
+      const { user } = await bootstrapSessionFromUserId(req, userId);
+      return res.json({ success: true, user });
     }
 
-    const { user } = await bootstrapSessionFromUserId(req, userId);
+    const { username, time, sig } = bootstrapFromRequest(req);
+    if (!username || !time || !sig) {
+      return res.status(400).json({ success: false, error: 'Missing user_id or username, time, sig' });
+    }
+
+    if (!verifyBootstrap({ username, time, sig })) {
+      return res.status(403).json({ success: false, error: 'Invalid signature or expired link' });
+    }
+
+    const { user } = await bootstrapSessionFromUsername(req, username);
     return res.json({ success: true, user });
   } catch (error) {
     console.error('bootstrap error:', error.response?.data || error.message);
@@ -331,18 +435,23 @@ app.get('/api/me', async (req, res) => {
     }
 
     const token = req.session.doceboToken || await loginToDocebo();
-    const currentUserId = req.session.user_id || req.session.user.user_id;
 
-    const fresh = await getUserById(token, currentUserId);
+    let fresh;
+    if (req.session.user_id) {
+      fresh = await getUserById(token, req.session.user_id);
+    } else {
+      fresh = await getUserByUsername(token, req.session.username || req.session.user.username);
+    }
+
     req.session.user = fresh;
-    req.session.user_id = fresh.user_id;
+    req.session.user_id = fresh.user_id || req.session.user_id || '';
     req.session.username = fresh.username || req.session.username || '';
     req.session.doceboToken = token;
 
-    return res.json({ success: true, user: fresh });
+    res.json({ success: true, user: fresh });
   } catch (error) {
     console.error('me error:', error.response?.data || error.message);
-    return res.status(500).json({ success: false, error: 'Failed to load current user' });
+    res.status(500).json({ success: false, error: 'Failed to load current user' });
   }
 });
 
@@ -353,26 +462,30 @@ app.get('/api/pending-items', async (req, res) => {
     }
 
     const token = req.session.doceboToken || await loginToDocebo();
-    const currentUserId = req.session.user_id || req.session.user.user_id;
 
-    const currentUser = await getUserById(token, currentUserId);
+    let currentUser;
+    if (req.session.user_id) {
+      currentUser = await getUserById(token, req.session.user_id);
+    } else {
+      currentUser = await getUserByUsername(token, req.session.username || req.session.user.username);
+    }
+
     req.session.user = currentUser;
-    req.session.user_id = currentUser.user_id;
+    req.session.user_id = currentUser.user_id || req.session.user_id || '';
     req.session.username = currentUser.username || req.session.username || '';
     req.session.doceboToken = token;
 
     const dashboard = await fetchDashboard(token, currentUser);
-    return res.json({ success: true, ...dashboard });
+    res.json({ success: true, ...dashboard });
   } catch (error) {
     console.error('pending-items error:', error.response?.data || error.message);
-    return res.status(500).json({ success: false, error: 'Failed to load pending items' });
+    res.status(500).json({ success: false, error: 'Failed to load pending items' });
   }
 });
 
 app.post('/api/approve', requireAuth, async (req, res) => {
   try {
     const { courseId, sessionId, userId } = req.body || {};
-
     if (!courseId || !userId) {
       return res.status(400).json({ success: false, error: 'courseId and userId are required' });
     }
@@ -381,17 +494,16 @@ app.post('/api/approve', requireAuth, async (req, res) => {
     await approveEnrollment(token, { courseId, sessionId, userId });
     req.session.doceboToken = token;
 
-    return res.json({ success: true, message: 'Enrollment approved successfully.' });
+    res.json({ success: true, message: 'Enrollment approved successfully.' });
   } catch (error) {
     console.error('approve error:', error.response?.data || error.message);
-    return res.status(500).json({ success: false, error: 'Failed to approve enrollment' });
+    res.status(500).json({ success: false, error: 'Failed to approve enrollment' });
   }
 });
 
 app.post('/api/deny', requireAuth, async (req, res) => {
   try {
     const { courseId, sessionId, userId } = req.body || {};
-
     if (!courseId || !userId) {
       return res.status(400).json({ success: false, error: 'courseId and userId are required' });
     }
@@ -400,23 +512,15 @@ app.post('/api/deny', requireAuth, async (req, res) => {
     await denyEnrollment(token, { courseId, sessionId, userId });
     req.session.doceboToken = token;
 
-    return res.json({ success: true, message: 'Enrollment declined successfully.' });
+    res.json({ success: true, message: 'Enrollment declined successfully.' });
   } catch (error) {
     console.error('deny error:', error.response?.data || error.message);
-    return res.status(500).json({ success: false, error: 'Failed to decline enrollment' });
+    res.status(500).json({ success: false, error: 'Failed to decline enrollment' });
   }
 });
 
 app.use(express.static(__dirname));
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
+app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'index.html'));
-});
-
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'index.html'));
-});
-
-app.listen(PORT, () => {
-  console.log(`Backend running on port ${PORT}`);
-});
+app.listen(PORT, () => console.log(`Backend running on port ${PORT}`));
