@@ -133,32 +133,125 @@ function mapUser(user = {}) {
 
 async function getUserById(token, userId) {
 
-  console.log('================================');
-  console.log('GET USER BY ID:', userId);
-  console.log('================================');
+  console.log('SEARCH USER ID:', userId);
 
-  const response = await doceboGet(
-    token,
-    `${DOCEBO_BASE_URL}/manage/v1/user/${userId}`
-  );
+  let page = 1;
 
-  console.log(
-    'USER RESPONSE:',
-    JSON.stringify(response)
-  );
+  while (true) {
 
-  const user =
-    response?.data?.user_data
-    || response?.data
-    || response
-    || {};
+    console.log('CHECK PAGE:', page);
 
-  return mapUser(user);
+    const response = await doceboGet(
+      token,
+      `${DOCEBO_BASE_URL}/manage/v1/user`,
+      {
+        page,
+        page_size: 100
+      }
+    );
+
+    const users =
+      response?.data?.items
+      || response?.data?.users
+      || response?.users
+      || [];
+
+    console.log(
+      `PAGE ${page} USERS COUNT:`,
+      users.length
+    );
+
+    const found = users.find(u =>
+      String(
+        u.user_id
+        || u.id
+        || ''
+      ) === String(userId)
+    );
+
+    if (found) {
+
+      console.log('FOUND USER:', found);
+
+      return mapUser(found);
+    }
+
+    const totalPages = Number(
+      response?.data?.total_page_count
+      || response?.total_page_count
+      || 1
+    );
+
+    console.log(
+      'TOTAL PAGES:',
+      totalPages
+    );
+
+    if (page >= totalPages) {
+      break;
+    }
+
+    page++;
+  }
+
+  console.log('USER NOT FOUND');
+
+  return {};
+}
+
+async function getUserByUsername(token, username) {
+
+  let page = 1;
+
+  while (true) {
+
+    const response = await doceboGet(
+      token,
+      `${DOCEBO_BASE_URL}/manage/v1/user`,
+      {
+        page,
+        page_size: 100
+      }
+    );
+
+    const users =
+      response?.data?.items
+      || response?.data?.users
+      || response?.users
+      || [];
+
+    const found = users.find(
+      u =>
+        normalize(u.username)
+        === normalize(username)
+    );
+
+    if (found) {
+      return mapUser(found);
+    }
+
+    const totalPages = Number(
+      response?.data?.total_page_count
+      || response?.total_page_count
+      || 1
+    );
+
+    if (page >= totalPages) {
+      break;
+    }
+
+    page++;
+  }
+
+  return {};
 }
 
 async function getSubordinates(token, managerId) {
 
-  console.log('GET SUBORDINATES FOR:', managerId);
+  console.log(
+    'GET SUBORDINATES FOR:',
+    managerId
+  );
 
   const response = await doceboGet(
     token,
@@ -170,12 +263,9 @@ async function getSubordinates(token, managerId) {
     JSON.stringify(response)
   );
 
-  const data =
-    response?.data
-    || response;
-
   const items =
-    data?.items
+    response?.data?.items
+    || response?.items
     || [];
 
   return items.map(item => ({
@@ -194,28 +284,40 @@ async function getSubordinates(token, managerId) {
 
 async function getPendingUsers(token) {
 
-  const response = await doceboGet(
-    token,
-    `${DOCEBO_BASE_URL}/learn/v1/enrollment/pending_users`,
-    {
-      page: 1,
-      page_size: 200
-    }
-  );
+  console.log('LOADING PENDING ENROLLMENTS...');
 
-  console.log(
-    'PENDING USERS RESPONSE:',
-    JSON.stringify(response)
-  );
+  try {
 
-  const data =
-    response?.data
-    || response;
+    const response = await doceboGet(
+      token,
+      `${DOCEBO_BASE_URL}/learning/v1/enrollments`,
+      {
+        status: 'waiting',
+        page: 1,
+        page_size: 200
+      }
+    );
 
-  return (
-    data?.items
-    || []
-  );
+    console.log(
+      'PENDING ENROLLMENTS RESPONSE:',
+      JSON.stringify(response)
+    );
+
+    return (
+      response?.data?.items
+      || response?.data
+      || []
+    );
+  }
+  catch (error) {
+
+    console.log(
+      'PENDING ENROLLMENTS ERROR:',
+      JSON.stringify(error.response?.data)
+    );
+
+    throw error;
+  }
 }
 
 function buildCourseUrl(courseId, slug) {
@@ -364,11 +466,14 @@ app.get('/debug/users', async (req, res) => {
 
     const response = await doceboGet(
       token,
-      `${DOCEBO_BASE_URL}/manage/v1/user/43600`
+      `${DOCEBO_BASE_URL}/manage/v1/user`,
+      {
+        page: 1,
+        page_size: 100
+      }
     );
 
     return res.json(response);
-
   }
   catch (error) {
 
@@ -387,43 +492,72 @@ app.get('/launch', async (req, res) => {
 
   try {
 
-    console.log('==============================');
-    console.log('LAUNCH START');
-    console.log('==============================');
+    console.log('================ LAUNCH START ================');
+
+    console.log('QUERY:', req.query);
+
+    req.session.user = null;
+    req.session.user_id = null;
+    req.session.doceboToken = null;
 
     const userId = String(
       req.query.user_id || ''
     ).trim();
 
+    const username = normalize(
+      req.query.username || ''
+    );
+
     console.log('USER ID:', userId);
 
-    if (!userId) {
+    console.log('USERNAME:', username);
+
+    if (!userId && !username) {
 
       return res.status(400).json({
+
         success: false,
-        error: 'Missing user_id'
+
+        error: 'Missing user_id or username from Docebo'
       });
     }
+
+    console.log('LOGIN TO DOCEBO...');
 
     const token = await loginToDocebo();
 
     console.log('TOKEN OK');
 
-    const user = await getUserById(
-      token,
-      userId
-    );
+    let user = null;
+
+    if (userId) {
+
+      user = await getUserById(
+        token,
+        userId
+      );
+    }
+
+    if ((!user || !user.user_id) && username) {
+
+      user = await getUserByUsername(
+        token,
+        username
+      );
+    }
 
     console.log(
-      'USER:',
+      'FINAL USER:',
       JSON.stringify(user)
     );
 
     if (!user || !user.user_id) {
 
       return res.status(404).json({
+
         success: false,
-        error: 'User not found'
+
+        error: 'User not found in Docebo'
       });
     }
 
@@ -433,53 +567,41 @@ app.get('/launch', async (req, res) => {
 
     req.session.doceboToken = token;
 
-    req.session.save(err => {
+    await new Promise((resolve, reject) => {
 
-      if (err) {
+      req.session.save(err => {
 
-        console.log(
-          'SESSION SAVE ERROR:',
-          err
-        );
-
-        return res.status(500).json({
-          success: false,
-          error: 'Session save failed'
-        });
-      }
-
-      console.log('SESSION SAVED');
-
-      return res.send(`
-        <html>
-          <body style="font-family:Arial;padding:40px">
-            <h2>Login OK</h2>
-
-            <p>User:</p>
-
-            <pre>${JSON.stringify(user, null, 2)}</pre>
-
-            <script>
-              setTimeout(() => {
-                window.location.href='/?t=' + Date.now();
-              }, 1000);
-            </script>
-          </body>
-        </html>
-      `);
+        if (err) {
+          reject(err);
+        }
+        else {
+          resolve();
+        }
+      });
     });
+
+    console.log('SESSION SAVED');
+
+    return res.redirect('/');
 
   }
   catch (error) {
 
-    console.log('==============================');
-    console.log('LAUNCH ERROR');
-    console.log('==============================');
-
-    console.log(error.message);
+    console.log('=============== LAUNCH ERROR ===============');
 
     console.log(
+      'ERROR MESSAGE:',
+      error.message
+    );
+
+    console.log(
+      'ERROR RESPONSE:',
       JSON.stringify(error.response?.data)
+    );
+
+    console.log(
+      'STACK:',
+      error.stack
     );
 
     return res.status(500).json({
@@ -551,7 +673,6 @@ app.get('/api/pending-items', async (req, res) => {
 
       ...dashboard
     });
-
   }
   catch (error) {
 
@@ -563,7 +684,9 @@ app.get('/api/pending-items', async (req, res) => {
 
       success: false,
 
-      error: 'Failed loading dashboard'
+      error: 'Failed loading dashboard',
+
+      details: error.response?.data || null
     });
   }
 });
@@ -591,7 +714,6 @@ app.post('/api/approve', async (req, res) => {
 
       message: 'Enrollment approved successfully.'
     });
-
   }
   catch (error) {
 
@@ -603,7 +725,9 @@ app.post('/api/approve', async (req, res) => {
 
       success: false,
 
-      error: 'Approval failed'
+      error: 'Approval failed',
+
+      details: error.response?.data || null
     });
   }
 });
@@ -631,7 +755,6 @@ app.post('/api/deny', async (req, res) => {
 
       message: 'Enrollment declined successfully.'
     });
-
   }
   catch (error) {
 
@@ -643,7 +766,9 @@ app.post('/api/deny', async (req, res) => {
 
       success: false,
 
-      error: 'Decline failed'
+      error: 'Decline failed',
+
+      details: error.response?.data || null
     });
   }
 });
