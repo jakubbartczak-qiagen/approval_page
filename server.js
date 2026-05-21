@@ -228,39 +228,92 @@ app.get('/debug/launch', (req, res) => {
 });
 
 app.get('/launch', async (req, res) => {
+
   try {
+
+    console.log('================ LAUNCH START ================');
+
+    console.log('QUERY:', req.query);
+
     const userId = String(req.query.user_id || '').trim();
 
+    console.log('USER ID:', userId);
+
     if (!userId) {
+
+      console.log('NO USER ID');
+
       return res.status(400).json({
         success: false,
         error: 'Missing user_id from Docebo'
       });
     }
 
+    console.log('LOGIN TO DOCEBO...');
+
     const token = await loginToDocebo();
+
+    console.log('TOKEN OK');
+
+    console.log('GETTING USER...');
 
     const user = await getUserById(token, userId);
 
+    console.log('USER RESPONSE:', user);
+
+    if (!user.user_id) {
+
+      console.log('USER NOT FOUND');
+
+      return res.status(404).json({
+        success: false,
+        error: 'User not found in Docebo'
+      });
+    }
+
     req.session.user = user;
+
     req.session.user_id = user.user_id;
+
     req.session.doceboToken = token;
 
+    console.log('SAVING SESSION...');
+
     await new Promise((resolve, reject) => {
+
       req.session.save(err => {
-        if (err) reject(err);
-        else resolve();
+
+        if (err) {
+          console.log('SESSION SAVE ERROR:', err);
+          reject(err);
+        }
+        else {
+          resolve();
+        }
       });
     });
 
+    console.log('SESSION SAVED');
+
+    console.log('REDIRECTING...');
+
     return res.redirect(`/?t=${Date.now()}`);
 
-  } catch (error) {
-    console.error(error.response?.data || error.message);
+  }
+  catch (error) {
+
+    console.log('=============== LAUNCH ERROR ===============');
+
+    console.log('ERROR MESSAGE:', error.message);
+
+    console.log('ERROR RESPONSE:', error.response?.data);
+
+    console.log('STACK:', error.stack);
 
     return res.status(500).json({
       success: false,
-      error: 'Launch failed'
+      error: error.message,
+      details: error.response?.data || null
     });
   }
 });
