@@ -60,16 +60,17 @@ function extractBootstrapParams(req) {
 
 function extractLaunchParams(req) {
   const payload = getPayload(req);
-  const user_id = String(firstDefined(payload, ['user_id', 'userId']) || '').trim();
-  const username = normalize(firstDefined(payload, ['username', 'user', 'u']) || '');
-  const auth_code = String(firstDefined(payload, ['auth_code', 'authCode']) || '').trim();
-  const hash = String(firstDefined(payload, ['hash']) || '').trim();
-  const course_id = String(firstDefined(payload, ['course_id', 'courseId']) || '').trim();
-  const course_code = String(firstDefined(payload, ['course_code', 'courseCode']) || '').trim();
-  const time = String(firstDefined(payload, ['time', 'ts']) || '').trim();
-  const sig = String(firstDefined(payload, ['sig', 's']) || '').trim();
-
-  return { user_id, username, auth_code, hash, course_id, course_code, time, sig };
+  return {
+    user_id: String(firstDefined(payload, ['user_id', 'userId']) || '').trim(),
+    username: normalize(firstDefined(payload, ['username', 'user', 'u']) || ''),
+    auth_code: String(firstDefined(payload, ['auth_code', 'authCode']) || '').trim(),
+    hash: String(firstDefined(payload, ['hash']) || '').trim(),
+    course_id: String(firstDefined(payload, ['course_id', 'courseId']) || '').trim(),
+    course_code: String(firstDefined(payload, ['course_code', 'courseCode']) || '').trim(),
+    time: String(firstDefined(payload, ['time', 'ts']) || '').trim(),
+    sig: String(firstDefined(payload, ['sig', 's']) || '').trim(),
+    raw: payload
+  };
 }
 
 function verifyBootstrap({ username, time, sig }) {
@@ -351,11 +352,6 @@ async function denyEnrollment(token, { courseId, sessionId, userId }) {
   await doceboDelete(token, url);
 }
 
-function extractUserId(req) {
-  const payload = getPayload(req);
-  return String(firstDefined(payload, ['user_id', 'userId']) || '').trim();
-}
-
 async function bootstrapSessionFromUsername(req, username) {
   const token = await loginToDocebo();
   const user = await getUserByUsername(token, username);
@@ -384,6 +380,20 @@ async function bootstrapSessionFromUserId(req, userId) {
 
 app.get('/health', (req, res) => res.json({ ok: true }));
 
+app.get('/debug/launch', (req, res) => {
+  const payload = getPayload(req);
+  res.json({
+    success: true,
+    method: req.method,
+    query: req.query,
+    body: req.body,
+    payload,
+    cookies: req.headers.cookie || null,
+    userAgent: req.headers['user-agent'] || null,
+    referer: req.headers.referer || req.headers.referrer || null
+  });
+});
+
 app.get('/sso/:username', (req, res) => {
   try {
     const username = normalize(req.params.username);
@@ -399,21 +409,48 @@ app.get('/sso/:username', (req, res) => {
   }
 });
 
-app.get('/launch', async (req, res) => {
+app.all('/launch', async (req, res) => {
   try {
-    const { user_id, username, auth_code, hash } = extractLaunchParams(req);
+    const launch = extractLaunchParams(req);
+    console.log('launch incoming:', JSON.stringify({
+      method: req.method,
+      query: req.query,
+      body: req.body,
+      headers: {
+        referer: req.headers.referer || req.headers.referrer || null,
+        userAgent: req.headers['user-agent'] || null
+      },
+      extracted: {
+        user_id: launch.user_id,
+        username: launch.username,
+        auth_code: launch.auth_code,
+        hash: launch.hash,
+        course_id: launch.course_id,
+        course_code: launch.course_code,
+        time: launch.time,
+        sig: launch.sig
+      }
+    }));
 
-    if (user_id) {
-      await bootstrapSessionFromUserId(req, user_id);
-      return res.redirect(`/?user_id=${encodeURIComponent(user_id)}`);
+    if (launch.user_id) {
+      await bootstrapSessionFromUserId(req, launch.user_id);
+      const target = launch.course_id ? `/?user_id=${encodeURIComponent(launch.user_id)}&course_id=${encodeURIComponent(launch.course_id)}` : `/?user_id=${encodeURIComponent(launch.user_id)}`;
+      return res.redirect(target);
     }
 
-    if (username && auth_code && hash) {
-      await bootstrapSessionFromUsername(req, username);
-      return res.redirect(`/?username=${encodeURIComponent(username)}`);
+    if (launch.username) {
+      if (launch.time && launch.sig && verifyBootstrap({ username: launch.username, time: launch.time, sig: launch.sig })) {
+        await bootstrapSessionFromUsername(req, launch.username);
+        return res.redirect('/');
+      }
+
+      if (launch.auth_code || launch.hash) {
+        await bootstrapSessionFromUsername(req, launch.username);
+        return res.redirect(`/?username=${encodeURIComponent(launch.username)}`);
+      }
     }
 
-    const { time, sig } = extractBootstrapParams(req);
+    const { username, time, sig } = extractBootstrapParams(req);
     if (username && time && sig && verifyBootstrap({ username, time, sig })) {
       await bootstrapSessionFromUsername(req, username);
       return res.redirect('/');
@@ -421,7 +458,12 @@ app.get('/launch', async (req, res) => {
 
     return res.status(400).json({
       success: false,
-      error: 'Missing Docebo launch payload or valid signed bootstrap parameters'
+      error: 'Missing Docebo launch payload or valid signed bootstrap parameters',
+      received: {
+        hasQuery: Object.keys(req.query || {}).length > 0,
+        hasBody: req.body && Object.keys(req.body).length > 0,
+        launch
+      }
     });
   } catch (error) {
     console.error('launch error:', error.response?.data || error.message);
@@ -434,19 +476,26 @@ app.get('/launch', async (req, res) => {
 
 app.all('/api/auth/bootstrap', async (req, res) => {
   try {
-    const { user_id, username, auth_code, hash } = extractLaunchParams(req);
+    const launch = extractLaunchParams(req);
 
-    if (user_id) {
-      const { user } = await bootstrapSessionFromUserId(req, user_id);
+    if (launch.user_id) {
+      const { user } = await bootstrapSessionFromUserId(req, launch.user_id);
       return res.json({ success: true, user });
     }
 
-    if (username && auth_code && hash) {
-      const { user } = await bootstrapSessionFromUsername(req, username);
-      return res.json({ success: true, user });
+    if (launch.username) {
+      if (launch.time && launch.sig && verifyBootstrap({ username: launch.username, time: launch.time, sig: launch.sig })) {
+        const { user } = await bootstrapSessionFromUsername(req, launch.username);
+        return res.json({ success: true, user });
+      }
+
+      if (launch.auth_code || launch.hash) {
+        const { user } = await bootstrapSessionFromUsername(req, launch.username);
+        return res.json({ success: true, user, note: 'bootstrapped from username + Docebo launch params' });
+      }
     }
 
-    const { time, sig } = extractBootstrapParams(req);
+    const { username, time, sig } = extractBootstrapParams(req);
     if (!username || !time || !sig) {
       return res.status(400).json({ success: false, error: 'Missing user_id or username, time, sig' });
     }
