@@ -44,23 +44,39 @@ function makeSig(username, time) {
 }
 
 function bootstrapFromRequest(req) {
-  const username = normalize(req.query.username || req.query.user || req.query.u || '');
-  const time = String(req.query.time || req.query.ts || '').trim();
-  const sig = String(req.query.sig || req.query.s || '').trim();
+  const username = normalize(
+    req.query.username ||
+    req.query.user ||
+    req.query.u ||
+    req.body?.username ||
+    req.body?.user ||
+    req.body?.u ||
+    ''
+  );
+  const time = String(req.query.time || req.query.ts || req.body?.time || req.body?.ts || '').trim();
+  const sig = String(req.query.sig || req.query.s || req.body?.sig || req.body?.s || '').trim();
   return { username, time, sig };
+}
+
+function extractUserId(req) {
+  return String(
+    req.query.user_id ||
+    req.query.userId ||
+    req.body?.user_id ||
+    req.body?.userId ||
+    req.body?.user?.id ||
+    req.body?.user?.user_id ||
+    ''
+  ).trim();
 }
 
 function verifyBootstrap({ username, time, sig }) {
   if (!BOOTSTRAP_SECRET || !username || !time || !sig) return false;
-
   const expected = makeSig(username, time);
   const a = Buffer.from(sig);
   const b = Buffer.from(expected);
   const now = Math.floor(Date.now() / 1000);
-
-  return a.length === b.length &&
-    crypto.timingSafeEqual(a, b) &&
-    Math.abs(now - Number(time)) <= 300;
+  return a.length === b.length && crypto.timingSafeEqual(a, b) && Math.abs(now - Number(time)) <= 300;
 }
 
 function isPendingStatus(v) {
@@ -377,7 +393,8 @@ app.get('/sso/:username', (req, res) => {
 
 app.get('/launch', async (req, res) => {
   try {
-    const userId = String(req.query.user_id || req.query.userId || '').trim();
+    const userId = extractUserId(req);
+
     if (userId) {
       await bootstrapSessionFromUserId(req, userId);
       return res.redirect(`/?user_id=${encodeURIComponent(userId)}`);
@@ -404,7 +421,7 @@ app.get('/launch', async (req, res) => {
 
 app.get('/api/auth/bootstrap', async (req, res) => {
   try {
-    const userId = String(req.query.user_id || req.query.userId || '').trim();
+    const userId = extractUserId(req);
 
     if (userId) {
       const { user } = await bootstrapSessionFromUserId(req, userId);
@@ -447,6 +464,7 @@ app.get('/api/me', async (req, res) => {
     req.session.user_id = fresh.user_id || req.session.user_id || '';
     req.session.username = fresh.username || req.session.username || '';
     req.session.doceboToken = token;
+    await saveSession(req);
 
     res.json({ success: true, user: fresh });
   } catch (error) {
@@ -474,6 +492,7 @@ app.get('/api/pending-items', async (req, res) => {
     req.session.user_id = currentUser.user_id || req.session.user_id || '';
     req.session.username = currentUser.username || req.session.username || '';
     req.session.doceboToken = token;
+    await saveSession(req);
 
     const dashboard = await fetchDashboard(token, currentUser);
     res.json({ success: true, ...dashboard });
@@ -493,6 +512,7 @@ app.post('/api/approve', requireAuth, async (req, res) => {
     const token = req.session.doceboToken || await loginToDocebo();
     await approveEnrollment(token, { courseId, sessionId, userId });
     req.session.doceboToken = token;
+    await saveSession(req);
 
     res.json({ success: true, message: 'Enrollment approved successfully.' });
   } catch (error) {
@@ -511,6 +531,7 @@ app.post('/api/deny', requireAuth, async (req, res) => {
     const token = req.session.doceboToken || await loginToDocebo();
     await denyEnrollment(token, { courseId, sessionId, userId });
     req.session.doceboToken = token;
+    await saveSession(req);
 
     res.json({ success: true, message: 'Enrollment declined successfully.' });
   } catch (error) {
