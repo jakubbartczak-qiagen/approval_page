@@ -229,26 +229,65 @@ async function getUserByUsername(token, username) {
   return mapUser(exact || users[0] || {});
 }
 
+```javascript
 async function getSubordinates(token, managerId) {
 
   console.log('GET SUBORDINATES FOR:', managerId);
 
-  const response = await doceboGet(
-    token,
-    `${DOCEBO_BASE_URL}/manage/v1/managers/${managerId}/subordinates`
+  let page = 1;
+
+  let allUsers = [];
+
+  while (page <= 500) {
+
+    const response = await doceboGet(
+      token,
+      `${DOCEBO_BASE_URL}/manage/v1/users`,
+      {
+        page,
+        page_size: 200
+      }
+    );
+
+    const users =
+      response?.data?.items
+      || [];
+
+    allUsers.push(...users);
+
+    const totalPages =
+      Number(
+        response?.data?.total_page_count
+        || 0
+      );
+
+    if (page >= totalPages) {
+      break;
+    }
+
+    page++;
+  }
+
+  console.log(
+    'TOTAL USERS LOADED:',
+    allUsers.length
+  );
+
+  const subordinates = allUsers.filter(
+    u =>
+      String(
+        u.manager_id
+        || u.managerid
+        || ''
+      ) === String(managerId)
   );
 
   console.log(
-    'SUBORDINATES RESPONSE:',
-    JSON.stringify(response)
+    'SUBORDINATES FOUND:',
+    subordinates.length
   );
 
-  const items =
-    response?.data?.items
-    || response?.items
-    || [];
-
-  return items.map(item => ({
+  return subordinates.map(item => ({
 
     user_id: String(item.user_id || ''),
 
