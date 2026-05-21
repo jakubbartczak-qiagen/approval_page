@@ -4,611 +4,384 @@ const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
 const session = require('express-session');
-const crypto = require('crypto');
 const path = require('path');
 
 const app = express();
 
 const PORT = process.env.PORT || 3000;
-const NODE_ENV = process.env.NODE_ENV || 'development';
-const IS_PROD = NODE_ENV === 'production';
 
-const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || 'https://jakubbartczak-qiagen.github.io';
-const DOCEBO_BASE_URL = (process.env.DOCEBO_BASE_URL || '').replace(/\/$/, '');
-const BOOTSTRAP_SECRET = process.env.BOOTSTRAP_SECRET || '';
+const DOCEBO_BASE_URL = process.env.DOCEBO_BASE_URL.replace(/\/$/, '');
 
-function required(name) {
-  const value = process.env[name];
-  if (!value) throw new Error(`Missing environment variable: ${name}`);
-  return value;
-}
+app.set('trust proxy', 1);
+
+app.use((req, res, next) => {
+  res.setHeader(
+    'Content-Security-Policy',
+    "frame-ancestors 'self' https://*.docebosaas.com"
+  );
+
+  next();
+});
+
+app.use(cors({
+  origin: true,
+  credentials: true
+}));
+
+app.use(express.json());
+
+app.use(session({
+  name: 'qialearn.sid',
+
+  secret: process.env.SESSION_SECRET,
+
+  resave: false,
+  saveUninitialized: false,
+
+  proxy: true,
+
+  rolling: true,
+
+  cookie: {
+    httpOnly: true,
+    secure: true,
+    sameSite: 'none',
+    maxAge: 1000 * 60 * 60 * 8
+  }
+}));
 
 function normalize(v) {
   return String(v || '').trim().toLowerCase();
 }
 
-function firstDefined(obj, keys) {
-  for (const key of keys) {
-    const value = obj?.[key];
-    if (value !== undefined && value !== null && value !== '') return value;
-  }
-  return undefined;
-}
-
-function parseCsv(value) {
-  return String(value || '').split(',').map(v => v.trim()).filter(Boolean);
-}
-
-function makeSig(username, time) {
-  return crypto.createHmac('sha256', BOOTSTRAP_SECRET).update(`${username}|${time}`).digest('hex');
-}
-
-function getPayload(req) {
-  return {
-    ...req.query,
-    ...(req.body && typeof req.body === 'object' ? req.body : {})
-  };
-}
-
-function extractBootstrapParams(req) {
-  const payload = getPayload(req);
-  const username = normalize(firstDefined(payload, ['username', 'user', 'u']) || '');
-  const time = String(firstDefined(payload, ['time', 'ts']) || '').trim();
-  const sig = String(firstDefined(payload, ['sig', 's']) || '').trim();
-  return { username, time, sig };
-}
-
-function extractLaunchParams(req) {
-  const payload = getPayload(req);
-  return {
-    user_id: String(firstDefined(payload, ['user_id', 'userId']) || '').trim(),
-    username: normalize(firstDefined(payload, ['username', 'user', 'u']) || ''),
-    auth_code: String(firstDefined(payload, ['auth_code', 'authCode']) || '').trim(),
-    hash: String(firstDefined(payload, ['hash']) || '').trim(),
-    course_id: String(firstDefined(payload, ['course_id', 'courseId']) || '').trim(),
-    course_code: String(firstDefined(payload, ['course_code', 'courseCode']) || '').trim(),
-    time: String(firstDefined(payload, ['time', 'ts']) || '').trim(),
-    sig: String(firstDefined(payload, ['sig', 's']) || '').trim(),
-    raw: payload
-  };
-}
-
-function verifyBootstrap({ username, time, sig }) {
-  if (!BOOTSTRAP_SECRET || !username || !time || !sig) return false;
-  const expected = makeSig(username, time);
-  const a = Buffer.from(sig);
-  const b = Buffer.from(expected);
-  const now = Math.floor(Date.now() / 1000);
-  return a.length === b.length && crypto.timingSafeEqual(a, b) && Math.abs(now - Number(time)) <= 300;
-}
-
-function isPendingStatus(v) {
-  return ['to_confirm', 'waiting', 'pending', 'pending approval'].includes(String(v || '').toLowerCase());
-}
-
-function normalizeStatus(value) {
-  const raw = String(value || '').toLowerCase().trim();
-  if (['to_confirm', 'waiting', 'pending', 'pending approval'].includes(raw)) return 'to_confirm';
-  if (['confirmed', 'approved', 'enrolled', 'subscribed'].includes(raw)) return 'confirmed';
-  if (['denied', 'rejected'].includes(raw)) return 'denied';
-  return raw || 'to_confirm';
-}
-
-function buildCourseUrl(courseId, courseSlug) {
-  if (!courseId) return '#';
-  if (courseSlug) return `${DOCEBO_BASE_URL}/course/${encodeURIComponent(courseSlug)}`;
-  return `${DOCEBO_BASE_URL}/course/view/${encodeURIComponent(courseId)}`;
-}
-
-app.set('trust proxy', 1);
-
-app.use(cors({
-  origin: FRONTEND_ORIGIN,
-  credentials: true
-}));
-
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-
-app.use(session({
-  secret: required('SESSION_SECRET'),
-  resave: false,
-  saveUninitialized: false,
-  proxy: IS_PROD,
-  cookie: {
-    httpOnly: true,
-    secure: IS_PROD,
-    sameSite: IS_PROD ? 'none' : 'lax',
-    maxAge: 1000 * 60 * 60 * 8
-  }
-}));
-
-function requireAuth(req, res, next) {
-  if (!req.session?.user) {
-    return res.status(401).json({ success: false, error: 'Not authenticated' });
-  }
-  next();
-}
-
-function saveSession(req) {
-  return new Promise((resolve, reject) => {
-    req.session.save(err => {
-      if (err) return reject(err);
-      resolve();
-    });
-  });
-}
-
 async function loginToDocebo() {
   const params = new URLSearchParams();
-  params.append('grant_type', 'password');
-  params.append('client_id', required('DOCEBO_CLIENT_ID'));
-  params.append('client_secret', required('DOCEBO_CLIENT_SECRET'));
-  params.append('username', required('DOCEBO_USERNAME'));
-  params.append('password', required('DOCEBO_PASSWORD'));
 
-  const response = await axios.post(`${DOCEBO_BASE_URL}/oauth2/token`, params, {
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
-  });
+  params.append('grant_type', 'password');
+  params.append('client_id', process.env.DOCEBO_CLIENT_ID);
+  params.append('client_secret', process.env.DOCEBO_CLIENT_SECRET);
+  params.append('username', process.env.DOCEBO_USERNAME);
+  params.append('password', process.env.DOCEBO_PASSWORD);
+
+  const response = await axios.post(
+    `${DOCEBO_BASE_URL}/oauth2/token`,
+    params,
+    {
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded'
+      }
+    }
+  );
 
   return response.data.access_token;
 }
 
 async function doceboGet(token, url, params = {}) {
   const response = await axios.get(url, {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: {
+      Authorization: `Bearer ${token}`
+    },
     params
   });
+
   return response.data;
-}
-
-async function doceboPut(token, url, body = {}) {
-  const response = await axios.put(url, body, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json'
-    }
-  });
-  return response.data;
-}
-
-async function doceboDelete(token, url) {
-  const response = await axios.delete(url, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json'
-    }
-  });
-  return response.data;
-}
-
-async function findUserIdByUsername(token, username) {
-  const queries = [
-    { username },
-    { search_text: username },
-    { q: username }
-  ];
-
-  for (const params of queries) {
-    try {
-      const data = await doceboGet(token, `${DOCEBO_BASE_URL}/manage/v1/user`, params);
-      const candidates = data?.data?.items || data?.data?.users || data?.items || data?.users || [];
-
-      if (Array.isArray(candidates) && candidates.length) {
-        const exact = candidates.find(u => normalize(firstDefined(u, ['username']) || '') === normalize(username));
-        const chosen = exact || candidates[0];
-        const id = String(firstDefined(chosen, ['user_id', 'userid', 'id']) || '');
-        if (id) return { user_id: id, raw: chosen };
-      }
-
-      const direct = data?.data?.user_data || data?.data || data || {};
-      const id = String(firstDefined(direct, ['user_id', 'userid', 'id']) || '');
-      const directUsername = normalize(firstDefined(direct, ['username']) || '');
-
-      if (id && (!directUsername || directUsername === normalize(username))) {
-        return { user_id: id, raw: direct };
-      }
-    } catch (e) {}
-  }
-
-  return { user_id: '', raw: {} };
-}
-
-async function findUserById(token, userId) {
-  const id = String(userId || '').trim();
-  if (!id) return {};
-
-  try {
-    const byId = await doceboGet(token, `${DOCEBO_BASE_URL}/manage/v1/user/${encodeURIComponent(id)}`);
-    return byId?.data?.user_data || byId?.data || byId || {};
-  } catch (e) {
-    try {
-      const byQuery = await doceboGet(token, `${DOCEBO_BASE_URL}/manage/v1/user`, { user_id: id });
-      return byQuery?.data?.user_data || byQuery?.data || byQuery || {};
-    } catch (e2) {
-      return {};
-    }
-  }
-}
-
-function mapUser(user, fallback = {}) {
-  const managerid = String(firstDefined(user, ['managerid', 'manager_id', 'managerId']) || '');
-  const managerusername = normalize(firstDefined(user, ['managerusername', 'manager_username', 'managerUserName']) || '');
-  const managerfirstname = String(firstDefined(user, ['managerfirstname', 'manager_first_name', 'managerFirstName']) || '');
-  const managerlastname = String(firstDefined(user, ['managerlastname', 'manager_last_name', 'managerLastName']) || '');
-
-  return {
-    user_id: String(firstDefined(user, ['user_id', 'userid', 'id']) || fallback.user_id || ''),
-    username: normalize(firstDefined(user, ['username']) || fallback.username || ''),
-    firstname: String(firstDefined(user, ['firstname', 'first_name']) || fallback.firstname || ''),
-    lastname: String(firstDefined(user, ['lastname', 'last_name']) || fallback.lastname || ''),
-    email: normalize(firstDefined(user, ['email']) || fallback.email || ''),
-    managerid,
-    managerusername,
-    managerfirstname,
-    managerlastname,
-    managerlabel: [managerfirstname, managerlastname].filter(Boolean).join(' ').trim() || managerusername || managerid || ''
-  };
-}
-
-async function getUserByUsername(token, username) {
-  const found = await findUserIdByUsername(token, username);
-  let user = found.raw || {};
-
-  if (found.user_id) {
-    const byId = await findUserById(token, found.user_id);
-    if (Object.keys(byId).length) user = byId;
-  }
-
-  return mapUser(user, { username, user_id: found.user_id });
 }
 
 async function getUserById(token, userId) {
-  const user = await findUserById(token, userId);
-  return mapUser(user, { user_id: String(userId || '').trim() });
-}
+  const response = await doceboGet(
+    token,
+    `${DOCEBO_BASE_URL}/manage/v1/user/${userId}`
+  );
 
-async function getSubordinates(token, managerId) {
-  const data = await doceboGet(token, `${DOCEBO_BASE_URL}/manage/v1/managers/${encodeURIComponent(managerId)}/subordinates`);
-  const items = data?.data?.items || data?.items || [];
-
-  return items.map(item => ({
-    user_id: String(firstDefined(item, ['user_id', 'subordinate_id', 'userid']) || ''),
-    username: normalize(firstDefined(item, ['username', 'subordinate_username']) || ''),
-    fullname: String(
-      firstDefined(item, ['fullname', 'subordinate_fullname']) ||
-      `${firstDefined(item, ['firstname', 'subordinate_firstname']) || ''} ${firstDefined(item, ['lastname', 'subordinate_lastname']) || ''}`.trim()
-    ),
-    email: normalize(firstDefined(item, ['email', 'subordinate_email']) || '')
-  })).filter(x => x.user_id);
-}
-
-async function getPendingUsers(token) {
-  const data = await doceboGet(token, `${DOCEBO_BASE_URL}/learn/v1/enrollment/pending_users`, { page: 1, page_size: 200 });
-  return data?.data?.items || data?.items || [];
-}
-
-function normalizePendingRow(row) {
-  const courseId = String(firstDefined(row, ['course_id', 'id_course', 'id']) || '');
-  const sessionId = String(firstDefined(row, ['session_id']) || '');
-  const courseSlug = String(firstDefined(row, ['course_slug', 'slug']) || '');
+  const user = response?.data?.user_data || response?.data || {};
 
   return {
-    user_id: String(firstDefined(row, ['user_id']) || ''),
-    username: normalize(firstDefined(row, ['username']) || ''),
-    fullname: String(firstDefined(row, ['fullname']) || ''),
-    email: normalize(firstDefined(row, ['email']) || ''),
-    course_id: courseId,
-    course_name: String(firstDefined(row, ['course_name', 'name_course', 'course_title', 'title']) || 'Unknown course'),
-    course_url: buildCourseUrl(courseId, courseSlug),
-    session_id: sessionId,
-    session_name: String(firstDefined(row, ['session_name', 'name_session']) || '-'),
-    session_start: String(firstDefined(row, ['session_start', 'date_start', 'start_date', 'start_at']) || '-'),
-    session_end: String(firstDefined(row, ['session_end', 'date_end', 'end_date', 'end_at']) || '-'),
-    enrollment_status: normalizeStatus(firstDefined(row, ['enrollment_status', 'status', 'state']))
+    user_id: String(user.user_id || ''),
+    username: normalize(user.username || ''),
+    firstname: user.firstname || '',
+    lastname: user.lastname || '',
+    email: normalize(user.email || '')
   };
 }
 
-async function fetchDashboard(token, currentUser) {
-  const excludedCourseIds = parseCsv(process.env.EXCLUDED_COURSE_IDS);
-  const subordinates = await getSubordinates(token, currentUser.user_id);
-  const subordinateIds = new Set(subordinates.map(s => String(s.user_id)));
-  const subordinateMap = new Map(subordinates.map(s => [String(s.user_id), s]));
-  const rawPending = await getPendingUsers(token);
+async function getSubordinates(token, managerId) {
+  const response = await doceboGet(
+    token,
+    `${DOCEBO_BASE_URL}/manage/v1/managers/${managerId}/subordinates`
+  );
 
-  const items = rawPending
-    .filter(row => subordinateIds.has(String(firstDefined(row, ['user_id']) || '')))
-    .map(row => {
-      const item = normalizePendingRow(row);
-      const subordinate = subordinateMap.get(String(item.user_id));
-      return {
-        ...item,
-        fullname: subordinate?.fullname || item.fullname || '',
-        email: subordinate?.email || item.email || '',
-        username: subordinate?.username || item.username || ''
-      };
-    })
-    .filter(item => isPendingStatus(item.enrollment_status))
-    .filter(item => !excludedCourseIds.includes(String(item.course_id)));
+  const items = response?.data?.items || [];
+
+  return items.map(item => ({
+    user_id: String(item.user_id || ''),
+    username: normalize(item.username || ''),
+    fullname:
+      item.fullname ||
+      `${item.firstname || ''} ${item.lastname || ''}`.trim(),
+    email: normalize(item.email || '')
+  }));
+}
+
+async function getPendingUsers(token) {
+  const response = await doceboGet(
+    token,
+    `${DOCEBO_BASE_URL}/learn/v1/enrollment/pending_users`,
+    {
+      page: 1,
+      page_size: 200
+    }
+  );
+
+  return response?.data?.items || [];
+}
+
+function buildCourseUrl(courseId, slug) {
+  if (slug) {
+    return `${DOCEBO_BASE_URL}/course/${slug}`;
+  }
+
+  return `${DOCEBO_BASE_URL}/course/view/${courseId}`;
+}
+
+async function loadDashboard(token, manager) {
+  const subordinates = await getSubordinates(token, manager.user_id);
+
+  const subordinateIds = new Set(
+    subordinates.map(x => String(x.user_id))
+  );
+
+  const pending = await getPendingUsers(token);
+
+  const items = pending
+    .filter(item => subordinateIds.has(String(item.user_id)))
+    .map(item => ({
+      user_id: String(item.user_id || ''),
+      fullname: item.fullname || '',
+      email: item.email || '',
+      course_id: String(item.course_id || ''),
+      course_name: item.course_name || '',
+      session_id: String(item.session_id || ''),
+      session_name: item.session_name || '-',
+      session_start: item.session_start || '-',
+      session_end: item.session_end || '-',
+      enrollment_status: item.enrollment_status || '',
+      course_url: buildCourseUrl(
+        item.course_id,
+        item.course_slug
+      )
+    }));
 
   return {
-    manager: currentUser,
+    manager,
     subordinates_count: subordinates.length,
     items
   };
 }
 
-async function approveEnrollment(token, { courseId, sessionId, userId }) {
-  const url = `${DOCEBO_BASE_URL}/learn/v1/enrollments/${encodeURIComponent(courseId)}/${encodeURIComponent(userId)}`;
-  const body = { status: 0 };
-  if (sessionId) body.session_id = Number(sessionId);
-  await doceboPut(token, url, body);
+async function approveEnrollment(token, courseId, userId, sessionId) {
+  const url =
+    `${DOCEBO_BASE_URL}/learn/v1/enrollments/${courseId}/${userId}`;
+
+  const body = {
+    status: 0
+  };
+
+  if (sessionId) {
+    body.session_id = Number(sessionId);
+  }
+
+  await axios.put(url, body, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    }
+  });
 }
 
-async function denyEnrollment(token, { courseId, sessionId, userId }) {
-  const url = sessionId
-    ? `${DOCEBO_BASE_URL}/learn/v1/enrollments/${encodeURIComponent(courseId)}/${encodeURIComponent(userId)}?session_id=${encodeURIComponent(sessionId)}`
-    : `${DOCEBO_BASE_URL}/learn/v1/enrollments/${encodeURIComponent(courseId)}/${encodeURIComponent(userId)}`;
-  await doceboDelete(token, url);
+async function denyEnrollment(token, courseId, userId, sessionId) {
+  let url =
+    `${DOCEBO_BASE_URL}/learn/v1/enrollments/${courseId}/${userId}`;
+
+  if (sessionId) {
+    url += `?session_id=${sessionId}`;
+  }
+
+  await axios.delete(url, {
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
 }
 
-async function bootstrapSessionFromUsername(req, username) {
-  const token = await loginToDocebo();
-  const user = await getUserByUsername(token, username);
-
-  req.session.user = user;
-  req.session.user_id = user.user_id || '';
-  req.session.username = user.username || username;
-  req.session.doceboToken = token;
-
-  await saveSession(req);
-  return { token, user };
-}
-
-async function bootstrapSessionFromUserId(req, userId) {
-  const token = await loginToDocebo();
-  const user = await getUserById(token, userId);
-
-  req.session.user = user;
-  req.session.user_id = user.user_id || String(userId || '').trim();
-  req.session.username = user.username || '';
-  req.session.doceboToken = token;
-
-  await saveSession(req);
-  return { token, user };
-}
-
-app.get('/health', (req, res) => res.json({ ok: true }));
-
-app.get('/debug/launch', (req, res) => {
-  const payload = getPayload(req);
+app.get('/health', (req, res) => {
   res.json({
-    success: true,
-    method: req.method,
-    query: req.query,
-    body: req.body,
-    payload,
-    cookies: req.headers.cookie || null,
-    userAgent: req.headers['user-agent'] || null,
-    referer: req.headers.referer || req.headers.referrer || null
+    ok: true
   });
 });
 
-app.get('/sso/:username', (req, res) => {
-  try {
-    const username = normalize(req.params.username);
-    if (!username) return res.status(400).send('Missing username');
-
-    const time = Math.floor(Date.now() / 1000).toString();
-    const sig = makeSig(username, time);
-    const url = `/api/auth/bootstrap?username=${encodeURIComponent(username)}&time=${encodeURIComponent(time)}&sig=${encodeURIComponent(sig)}`;
-    return res.redirect(url);
-  } catch (error) {
-    console.error('sso generator error:', error.message);
-    return res.status(500).send('Failed to generate signed url');
-  }
+app.get('/debug/launch', (req, res) => {
+  res.json({
+    query: req.query,
+    cookies: req.headers.cookie || null,
+    session: req.session || null
+  });
 });
 
-app.all('/launch', async (req, res) => {
+app.get('/launch', async (req, res) => {
   try {
-    const launch = extractLaunchParams(req);
-    console.log('launch incoming:', JSON.stringify({
-      method: req.method,
-      query: req.query,
-      body: req.body,
-      headers: {
-        referer: req.headers.referer || req.headers.referrer || null,
-        userAgent: req.headers['user-agent'] || null
-      },
-      extracted: {
-        user_id: launch.user_id,
-        username: launch.username,
-        auth_code: launch.auth_code,
-        hash: launch.hash,
-        course_id: launch.course_id,
-        course_code: launch.course_code,
-        time: launch.time,
-        sig: launch.sig
-      }
-    }));
+    const userId = String(req.query.user_id || '').trim();
 
-    if (launch.user_id) {
-      await bootstrapSessionFromUserId(req, launch.user_id);
-      const target = launch.course_id ? `/?user_id=${encodeURIComponent(launch.user_id)}&course_id=${encodeURIComponent(launch.course_id)}` : `/?user_id=${encodeURIComponent(launch.user_id)}`;
-      return res.redirect(target);
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing user_id from Docebo'
+      });
     }
 
-    if (launch.username) {
-      if (launch.time && launch.sig && verifyBootstrap({ username: launch.username, time: launch.time, sig: launch.sig })) {
-        await bootstrapSessionFromUsername(req, launch.username);
-        return res.redirect('/');
-      }
+    const token = await loginToDocebo();
 
-      if (launch.auth_code || launch.hash) {
-        await bootstrapSessionFromUsername(req, launch.username);
-        return res.redirect(`/?username=${encodeURIComponent(launch.username)}`);
-      }
-    }
+    const user = await getUserById(token, userId);
 
-    const { username, time, sig } = extractBootstrapParams(req);
-    if (username && time && sig && verifyBootstrap({ username, time, sig })) {
-      await bootstrapSessionFromUsername(req, username);
-      return res.redirect('/');
-    }
+    req.session.user = user;
+    req.session.user_id = user.user_id;
+    req.session.doceboToken = token;
 
-    return res.status(400).json({
-      success: false,
-      error: 'Missing Docebo launch payload or valid signed bootstrap parameters',
-      received: {
-        hasQuery: Object.keys(req.query || {}).length > 0,
-        hasBody: req.body && Object.keys(req.body).length > 0,
-        launch
-      }
+    await new Promise((resolve, reject) => {
+      req.session.save(err => {
+        if (err) reject(err);
+        else resolve();
+      });
     });
+
+    return res.redirect(`/?t=${Date.now()}`);
+
   } catch (error) {
-    console.error('launch error:', error.response?.data || error.message);
+    console.error(error.response?.data || error.message);
+
     return res.status(500).json({
       success: false,
-      error: 'Failed to launch session'
+      error: 'Launch failed'
     });
-  }
-});
-
-app.all('/api/auth/bootstrap', async (req, res) => {
-  try {
-    const launch = extractLaunchParams(req);
-
-    if (launch.user_id) {
-      const { user } = await bootstrapSessionFromUserId(req, launch.user_id);
-      return res.json({ success: true, user });
-    }
-
-    if (launch.username) {
-      if (launch.time && launch.sig && verifyBootstrap({ username: launch.username, time: launch.time, sig: launch.sig })) {
-        const { user } = await bootstrapSessionFromUsername(req, launch.username);
-        return res.json({ success: true, user });
-      }
-
-      if (launch.auth_code || launch.hash) {
-        const { user } = await bootstrapSessionFromUsername(req, launch.username);
-        return res.json({ success: true, user, note: 'bootstrapped from username + Docebo launch params' });
-      }
-    }
-
-    const { username, time, sig } = extractBootstrapParams(req);
-    if (!username || !time || !sig) {
-      return res.status(400).json({ success: false, error: 'Missing user_id or username, time, sig' });
-    }
-
-    if (!verifyBootstrap({ username, time, sig })) {
-      return res.status(403).json({ success: false, error: 'Invalid signature or expired link' });
-    }
-
-    const { user } = await bootstrapSessionFromUsername(req, username);
-    return res.json({ success: true, user });
-  } catch (error) {
-    console.error('bootstrap error:', error.response?.data || error.message);
-    return res.status(500).json({ success: false, error: 'Failed to bootstrap session' });
   }
 });
 
 app.get('/api/me', async (req, res) => {
   try {
-    if (!req.session?.user) {
-      return res.status(401).json({ success: false, error: 'Not authenticated' });
+    if (!req.session.user) {
+      return res.status(401).json({
+        success: false,
+        error: 'Not authenticated'
+      });
     }
 
-    const token = req.session.doceboToken || await loginToDocebo();
+    res.json({
+      success: true,
+      user: req.session.user
+    });
 
-    let fresh;
-    if (req.session.user_id) {
-      fresh = await getUserById(token, req.session.user_id);
-    } else {
-      fresh = await getUserByUsername(token, req.session.username || req.session.user.username);
-    }
-
-    req.session.user = fresh;
-    req.session.user_id = fresh.user_id || req.session.user_id || '';
-    req.session.username = fresh.username || req.session.username || '';
-    req.session.doceboToken = token;
-    await saveSession(req);
-
-    res.json({ success: true, user: fresh });
   } catch (error) {
-    console.error('me error:', error.response?.data || error.message);
-    res.status(500).json({ success: false, error: 'Failed to load current user' });
+    res.status(500).json({
+      success: false,
+      error: 'Failed'
+    });
   }
 });
 
 app.get('/api/pending-items', async (req, res) => {
   try {
-    if (!req.session?.user) {
-      return res.status(401).json({ success: false, error: 'Not authenticated' });
+    if (!req.session.user) {
+      return res.status(401).json({
+        success: false,
+        error: 'Not authenticated'
+      });
     }
 
-    const token = req.session.doceboToken || await loginToDocebo();
+    const dashboard = await loadDashboard(
+      req.session.doceboToken,
+      req.session.user
+    );
 
-    let currentUser;
-    if (req.session.user_id) {
-      currentUser = await getUserById(token, req.session.user_id);
-    } else {
-      currentUser = await getUserByUsername(token, req.session.username || req.session.user.username);
-    }
+    res.json({
+      success: true,
+      ...dashboard
+    });
 
-    req.session.user = currentUser;
-    req.session.user_id = currentUser.user_id || req.session.user_id || '';
-    req.session.username = currentUser.username || req.session.username || '';
-    req.session.doceboToken = token;
-    await saveSession(req);
-
-    const dashboard = await fetchDashboard(token, currentUser);
-    res.json({ success: true, ...dashboard });
   } catch (error) {
-    console.error('pending-items error:', error.response?.data || error.message);
-    res.status(500).json({ success: false, error: 'Failed to load pending items' });
+    console.error(error.response?.data || error.message);
+
+    res.status(500).json({
+      success: false,
+      error: 'Failed loading dashboard'
+    });
   }
 });
 
-app.post('/api/approve', requireAuth, async (req, res) => {
+app.post('/api/approve', async (req, res) => {
   try {
-    const { courseId, sessionId, userId } = req.body || {};
-    if (!courseId || !userId) {
-      return res.status(400).json({ success: false, error: 'courseId and userId are required' });
-    }
+    const {
+      courseId,
+      sessionId,
+      userId
+    } = req.body;
 
-    const token = req.session.doceboToken || await loginToDocebo();
-    await approveEnrollment(token, { courseId, sessionId, userId });
-    req.session.doceboToken = token;
-    await saveSession(req);
+    await approveEnrollment(
+      req.session.doceboToken,
+      courseId,
+      userId,
+      sessionId
+    );
 
-    res.json({ success: true, message: 'Enrollment approved successfully.' });
+    res.json({
+      success: true,
+      message: 'Enrollment approved successfully.'
+    });
+
   } catch (error) {
-    console.error('approve error:', error.response?.data || error.message);
-    res.status(500).json({ success: false, error: 'Failed to approve enrollment' });
+    console.error(error.response?.data || error.message);
+
+    res.status(500).json({
+      success: false,
+      error: 'Approval failed'
+    });
   }
 });
 
-app.post('/api/deny', requireAuth, async (req, res) => {
+app.post('/api/deny', async (req, res) => {
   try {
-    const { courseId, sessionId, userId } = req.body || {};
-    if (!courseId || !userId) {
-      return res.status(400).json({ success: false, error: 'courseId and userId are required' });
-    }
+    const {
+      courseId,
+      sessionId,
+      userId
+    } = req.body;
 
-    const token = req.session.doceboToken || await loginToDocebo();
-    await denyEnrollment(token, { courseId, sessionId, userId });
-    req.session.doceboToken = token;
-    await saveSession(req);
+    await denyEnrollment(
+      req.session.doceboToken,
+      courseId,
+      userId,
+      sessionId
+    );
 
-    res.json({ success: true, message: 'Enrollment declined successfully.' });
+    res.json({
+      success: true,
+      message: 'Enrollment declined successfully.'
+    });
+
   } catch (error) {
-    console.error('deny error:', error.response?.data || error.message);
-    res.status(500).json({ success: false, error: 'Failed to decline enrollment' });
+    console.error(error.response?.data || error.message);
+
+    res.status(500).json({
+      success: false,
+      error: 'Decline failed'
+    });
   }
 });
 
 app.use(express.static(__dirname));
-app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
-app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
-app.listen(PORT, () => console.log(`Backend running on port ${PORT}`));
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
