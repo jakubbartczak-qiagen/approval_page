@@ -66,8 +66,6 @@ function normalize(v) {
 
 async function loginToDocebo() {
 
-  console.log('LOGIN TO DOCEBO');
-
   const params = new URLSearchParams();
 
   params.append('grant_type', 'password');
@@ -86,14 +84,10 @@ async function loginToDocebo() {
     }
   );
 
-  console.log('TOKEN RECEIVED');
-
   return response.data.access_token;
 }
 
 async function doceboGet(token, url, params = {}) {
-
-  console.log('GET:', url);
 
   const response = await axios.get(url, {
 
@@ -123,12 +117,10 @@ function mapUser(user = {}) {
 
     firstname:
       user.firstname
-      || user.first_name
       || '',
 
     lastname:
       user.lastname
-      || user.last_name
       || '',
 
     email: normalize(
@@ -139,122 +131,66 @@ function mapUser(user = {}) {
 
 async function getUserById(token, userId) {
 
-  console.log('GET USER DIRECT:', userId);
+  console.log('GET USER BY ID:', userId);
 
-  try {
+  const response = await doceboGet(
+    token,
+    `${DOCEBO_BASE_URL}/manage/v1/user/${userId}`
+  );
 
-    const response = await doceboGet(
-      token,
-      `${DOCEBO_BASE_URL}/manage/v1/users/${userId}`
-    );
+  console.log(
+    'USER RESPONSE:',
+    JSON.stringify(response)
+  );
 
-    console.log(
-      'DIRECT USER RESPONSE:',
-      JSON.stringify(response)
-    );
+  const user =
+    response?.data?.user_data
+    || response?.data
+    || {};
 
-    const user =
-      response?.data
-      || response?.user
-      || response
-      || {};
-
-    return mapUser(user);
-  }
-  catch (error) {
-
-    console.log(
-      'DIRECT USER ERROR:',
-      JSON.stringify(error.response?.data)
-    );
-
-    return {};
-  }
+  return mapUser(user);
 }
 
 async function getSubordinates(token, managerId) {
 
-  console.log(
-    'GET SUBORDINATES FOR:',
-    managerId
+  const response = await doceboGet(
+    token,
+    `${DOCEBO_BASE_URL}/manage/v1/managers/${managerId}/subordinates`
   );
 
-  try {
+  const items =
+    response?.data?.items
+    || [];
 
-    const response = await doceboGet(
-      token,
-      `${DOCEBO_BASE_URL}/manage/v1/managers/${managerId}/subordinates`
-    );
+  return items.map(item => ({
 
-    console.log(
-      'SUBORDINATES RESPONSE:',
-      JSON.stringify(response)
-    );
+    user_id: String(item.user_id || ''),
 
-    const items =
-      response?.data?.items
-      || response?.items
-      || [];
+    username: normalize(item.username || ''),
 
-    return items.map(item => ({
+    fullname:
+      item.fullname
+      || `${item.firstname || ''} ${item.lastname || ''}`.trim(),
 
-      user_id: String(item.user_id || ''),
-
-      username: normalize(item.username || ''),
-
-      fullname:
-        item.fullname
-        || `${item.firstname || ''} ${item.lastname || ''}`.trim(),
-
-      email: normalize(item.email || '')
-    }));
-  }
-  catch (error) {
-
-    console.log(
-      'SUBORDINATES ERROR:',
-      JSON.stringify(error.response?.data)
-    );
-
-    return [];
-  }
+    email: normalize(item.email || '')
+  }));
 }
 
 async function getPendingUsers(token) {
 
-  console.log('LOADING PENDING USERS...');
+  const response = await doceboGet(
+    token,
+    `${DOCEBO_BASE_URL}/learn/v1/enrollment/pending_users`,
+    {
+      page: 1,
+      page_size: 200
+    }
+  );
 
-  try {
-
-    const response = await doceboGet(
-      token,
-      `${DOCEBO_BASE_URL}/learn/v1/enrollment/pending_users`,
-      {
-        page: 1,
-        page_size: 200
-      }
-    );
-
-    console.log(
-      'PENDING USERS RESPONSE:',
-      JSON.stringify(response)
-    );
-
-    return (
-      response?.data?.items
-      || response?.items
-      || []
-    );
-  }
-  catch (error) {
-
-    console.log(
-      'PENDING USERS ERROR:',
-      JSON.stringify(error.response?.data)
-    );
-
-    return [];
-  }
+  return (
+    response?.data?.items
+    || []
+  );
 }
 
 function buildCourseUrl(courseId, slug) {
@@ -268,16 +204,9 @@ function buildCourseUrl(courseId, slug) {
 
 async function loadDashboard(token, manager) {
 
-  console.log('LOAD DASHBOARD');
-
   const subordinates = await getSubordinates(
     token,
     manager.user_id
-  );
-
-  console.log(
-    'SUBORDINATES COUNT:',
-    subordinates.length
   );
 
   const subordinateIds = new Set(
@@ -285,11 +214,6 @@ async function loadDashboard(token, manager) {
   );
 
   const pending = await getPendingUsers(token);
-
-  console.log(
-    'PENDING COUNT:',
-    pending.length
-  );
 
   const items = pending
 
@@ -407,32 +331,6 @@ app.get('/debug/launch', (req, res) => {
   });
 });
 
-app.get('/debug/users/:id', async (req, res) => {
-
-  try {
-
-    const token = await loginToDocebo();
-
-    const response = await doceboGet(
-      token,
-      `${DOCEBO_BASE_URL}/manage/v1/users/${req.params.id}`
-    );
-
-    return res.json(response);
-  }
-  catch (error) {
-
-    return res.status(500).json({
-
-      success: false,
-
-      error: error.message,
-
-      details: error.response?.data || null
-    });
-  }
-});
-
 app.get('/launch', async (req, res) => {
 
   try {
@@ -443,13 +341,10 @@ app.get('/launch', async (req, res) => {
 
     req.session.user = null;
     req.session.user_id = null;
-    req.session.doceboToken = null;
 
     const userId = String(
       req.query.user_id || ''
     ).trim();
-
-    console.log('USER ID:', userId);
 
     if (!userId) {
 
@@ -473,7 +368,7 @@ app.get('/launch', async (req, res) => {
       JSON.stringify(user)
     );
 
-    if (!user || !user.user_id) {
+    if (!user.user_id) {
 
       return res.status(404).json({
 
@@ -502,9 +397,7 @@ app.get('/launch', async (req, res) => {
       });
     });
 
-    console.log('SESSION SAVED');
-
-    return res.redirect('/');
+    return res.redirect(`/?t=${Date.now()}`);
 
   }
   catch (error) {
@@ -519,11 +412,6 @@ app.get('/launch', async (req, res) => {
     console.log(
       'ERROR RESPONSE:',
       JSON.stringify(error.response?.data)
-    );
-
-    console.log(
-      'STACK:',
-      error.stack
     );
 
     return res.status(500).json({
@@ -595,6 +483,7 @@ app.get('/api/pending-items', async (req, res) => {
 
       ...dashboard
     });
+
   }
   catch (error) {
 
@@ -606,9 +495,7 @@ app.get('/api/pending-items', async (req, res) => {
 
       success: false,
 
-      error: 'Failed loading dashboard',
-
-      details: error.response?.data || null
+      error: 'Failed loading dashboard'
     });
   }
 });
@@ -636,6 +523,7 @@ app.post('/api/approve', async (req, res) => {
 
       message: 'Enrollment approved successfully.'
     });
+
   }
   catch (error) {
 
@@ -647,9 +535,7 @@ app.post('/api/approve', async (req, res) => {
 
       success: false,
 
-      error: 'Approval failed',
-
-      details: error.response?.data || null
+      error: 'Approval failed'
     });
   }
 });
@@ -677,6 +563,7 @@ app.post('/api/deny', async (req, res) => {
 
       message: 'Enrollment declined successfully.'
     });
+
   }
   catch (error) {
 
@@ -688,9 +575,7 @@ app.post('/api/deny', async (req, res) => {
 
       success: false,
 
-      error: 'Decline failed',
-
-      details: error.response?.data || null
+      error: 'Decline failed'
     });
   }
 });
