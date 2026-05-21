@@ -284,39 +284,38 @@ async function getSubordinates(token, managerId) {
 
 async function getPendingUsers(token) {
 
-  console.log('LOADING PENDING ENROLLMENTS...');
+  console.log('LOADING PENDING USERS...');
 
   try {
 
     const response = await doceboGet(
       token,
-      `${DOCEBO_BASE_URL}/learning/v1/enrollments`,
+      `${DOCEBO_BASE_URL}/learn/v1/enrollment/pending_users`,
       {
-        status: 'waiting',
         page: 1,
         page_size: 200
       }
     );
 
     console.log(
-      'PENDING ENROLLMENTS RESPONSE:',
+      'PENDING USERS RESPONSE:',
       JSON.stringify(response)
     );
 
     return (
       response?.data?.items
-      || response?.data
+      || response?.items
       || []
     );
   }
   catch (error) {
 
     console.log(
-      'PENDING ENROLLMENTS ERROR:',
+      'PENDING USERS ERROR:',
       JSON.stringify(error.response?.data)
     );
 
-    throw error;
+    return [];
   }
 }
 
