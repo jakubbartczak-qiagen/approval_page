@@ -178,26 +178,68 @@ async function getSubordinates(token, managerId) {
 
 async function getPendingUsers(token) {
 
-  console.log('LOADING PENDING ENROLLMENTS...');
+  console.log('================ PENDING USERS ================');
 
-  const response = await doceboGet(
-    token,
-    `${DOCEBO_BASE_URL}/learn/v1/enrollments/pending`,
-    {
-      page: 1,
-      page_size: 200
+  const endpoints = [
+
+    '/learn/v1/enrollments/pending',
+
+    '/learn/v1/enrollment/pending_users',
+
+    '/manage/v1/enrollments/pending'
+  ];
+
+  for (const endpoint of endpoints) {
+
+    try {
+
+      console.log('TRY ENDPOINT:', endpoint);
+
+      const response = await doceboGet(
+        token,
+        `${DOCEBO_BASE_URL}${endpoint}`,
+        {
+          page: 1,
+          page_size: 200
+        }
+      );
+
+      console.log(
+        'SUCCESS ENDPOINT:',
+        endpoint
+      );
+
+      console.log(
+        JSON.stringify(response)
+      );
+
+      return (
+        response?.data?.items
+        || response?.items
+        || []
+      );
     }
-  );
+    catch (error) {
 
-  console.log(
-    'PENDING RESPONSE:',
-    JSON.stringify(response)
-  );
+      console.log(
+        'FAILED ENDPOINT:',
+        endpoint
+      );
 
-  return (
-    response?.data?.items
-    || response?.items
-    || []
+      console.log(
+        'STATUS:',
+        error.response?.status
+      );
+
+      console.log(
+        'DATA:',
+        JSON.stringify(error.response?.data)
+      );
+    }
+  }
+
+  throw new Error(
+    'No pending enrollment endpoint works'
   );
 }
 
