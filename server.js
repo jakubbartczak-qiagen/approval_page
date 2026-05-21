@@ -133,37 +133,136 @@ function mapUser(user = {}) {
 
 async function getUserById(token, userId) {
 
-  console.log('SEARCHING USER:', userId);
+  console.log('====================================');
+  console.log('SEARCH USER ID:', userId);
+  console.log('====================================');
 
-  try {
+  let page = 1;
+  let totalPages = 1;
+
+  while (page <= totalPages) {
+
+    console.log(`CHECKING PAGE ${page}/${totalPages}`);
 
     const response = await doceboGet(
       token,
-      `${DOCEBO_BASE_URL}/manage/v1/user/${userId}`
+      `${DOCEBO_BASE_URL}/manage/v1/users`,
+      {
+        page,
+        page_size: 200
+      }
     );
 
     console.log(
-      'USER RESPONSE:',
-      JSON.stringify(response)
+      'RAW RESPONSE PAGE:',
+      page,
+      JSON.stringify(response).substring(0, 1000)
     );
 
-    const rawUser =
-      response?.data?.user_data
-      || response?.data
-      || {};
+    const data =
+      response?.data
+      || response;
 
-    return mapUser(rawUser);
+    const users =
+      data?.items
+      || data?.users
+      || response?.users
+      || [];
 
-  }
-  catch (error) {
+    totalPages = Number(
+      data?.total_page_count
+      || data?.pagination?.total_page_count
+      || 1
+    );
 
     console.log(
-      'DIRECT USER LOOKUP FAILED:',
-      error.response?.data || error.message
+      `USERS FOUND ON PAGE ${page}:`,
+      users.length
     );
 
-    return {};
+    const found = users.find(u => {
+
+      const currentId = String(
+        u.user_id
+        || u.id
+        || ''
+      );
+
+      return currentId === String(userId);
+    });
+
+    if (found) {
+
+      console.log('====================================');
+      console.log('USER FOUND');
+      console.log(JSON.stringify(found));
+      console.log('====================================');
+
+      return mapUser(found);
+    }
+
+    page++;
   }
+
+  console.log('====================================');
+  console.log('USER NOT FOUND');
+  console.log('====================================');
+
+  return null;
+}
+
+async function getUserByUsername(token, username) {
+
+  console.log('SEARCH USERNAME:', username);
+
+  let page = 1;
+  let totalPages = 1;
+
+  while (page <= totalPages) {
+
+    console.log(`USERNAME PAGE ${page}/${totalPages}`);
+
+    const response = await doceboGet(
+      token,
+      `${DOCEBO_BASE_URL}/manage/v1/users`,
+      {
+        page,
+        page_size: 200
+      }
+    );
+
+    const data =
+      response?.data
+      || response;
+
+    const users =
+      data?.items
+      || data?.users
+      || [];
+
+    totalPages = Number(
+      data?.total_page_count
+      || data?.pagination?.total_page_count
+      || 1
+    );
+
+    const found = users.find(
+      u =>
+        normalize(u.username)
+        === normalize(username)
+    );
+
+    if (found) {
+
+      console.log('USERNAME FOUND');
+
+      return mapUser(found);
+    }
+
+    page++;
+  }
+
+  return null;
 }
 
 async function getSubordinates(token, managerId) {
@@ -175,14 +274,12 @@ async function getSubordinates(token, managerId) {
     `${DOCEBO_BASE_URL}/manage/v1/managers/${managerId}/subordinates`
   );
 
-  console.log(
-    'SUBORDINATES RESPONSE:',
-    JSON.stringify(response)
-  );
+  const data =
+    response?.data
+    || response;
 
   const items =
-    response?.data?.items
-    || response?.items
+    data?.items
     || [];
 
   return items.map(item => ({
@@ -210,14 +307,12 @@ async function getPendingUsers(token) {
     }
   );
 
-  console.log(
-    'PENDING USERS RESPONSE:',
-    JSON.stringify(response)
-  );
+  const data =
+    response?.data
+    || response;
 
   return (
-    response?.data?.items
-    || response?.items
+    data?.items
     || []
   );
 }
@@ -368,10 +463,10 @@ app.get('/debug/users', async (req, res) => {
 
     const response = await doceboGet(
       token,
-      `${DOCEBO_BASE_URL}/manage/v1/user`,
+      `${DOCEBO_BASE_URL}/manage/v1/users`,
       {
-        page: 1,
-        page_size: 50
+        page: Number(req.query.page || 1),
+        page_size: 200
       }
     );
 
@@ -395,42 +490,66 @@ app.get('/launch', async (req, res) => {
 
   try {
 
-    console.log('================ LAUNCH START ================');
+    console.log('====================================');
+    console.log('LAUNCH START');
+    console.log('====================================');
 
     console.log('QUERY:', req.query);
 
-    await new Promise(resolve => {
-      req.session.destroy(() => resolve());
-    });
+    if (req.session) {
+
+      await new Promise(resolve => {
+
+        req.session.destroy(() => {
+          resolve();
+        });
+      });
+    }
 
     const userId = String(
       req.query.user_id || ''
     ).trim();
 
-    console.log('USER ID:', userId);
+    const username = normalize(
+      req.query.username || ''
+    );
 
-    if (!userId) {
+    console.log('USER ID:', userId);
+    console.log('USERNAME:', username);
+
+    if (!userId && !username) {
 
       return res.status(400).json({
 
         success: false,
 
-        error: 'Missing user_id from Docebo'
+        error: 'Missing user_id or username from Docebo'
       });
     }
 
-    console.log('LOGIN TO DOCEBO...');
+    console.log('LOGIN TO DOCEBO');
 
     const token = await loginToDocebo();
 
     console.log('TOKEN OK');
 
-    console.log('GET USER BY ID...');
+    let user = null;
 
-    const user = await getUserById(
-      token,
-      userId
-    );
+    if (userId) {
+
+      user = await getUserById(
+        token,
+        userId
+      );
+    }
+
+    if ((!user || !user.user_id) && username) {
+
+      user = await getUserByUsername(
+        token,
+        username
+      );
+    }
 
     console.log(
       'FINAL USER:',
@@ -447,83 +566,35 @@ app.get('/launch', async (req, res) => {
       });
     }
 
-    req.session.regenerate(async err => {
+    req.session.user = user;
 
-      if (err) {
+    req.session.user_id = user.user_id;
 
-        console.log(
-          'SESSION REGENERATE ERROR:',
-          err
-        );
+    req.session.doceboToken = token;
 
-        return res.status(500).json({
+    await new Promise((resolve, reject) => {
 
-          success: false,
+      req.session.save(err => {
 
-          error: 'Session regeneration failed'
-        });
-      }
-
-      try {
-
-        req.session.user = user;
-
-        req.session.user_id = user.user_id;
-
-        req.session.doceboToken = token;
-
-        console.log('SAVING SESSION...');
-
-        await new Promise((resolve, reject) => {
-
-          req.session.save(saveErr => {
-
-            if (saveErr) {
-
-              console.log(
-                'SESSION SAVE ERROR:',
-                saveErr
-              );
-
-              reject(saveErr);
-            }
-            else {
-
-              resolve();
-            }
-          });
-        });
-
-        console.log('SESSION SAVED');
-
-        console.log(
-          'SESSION USER:',
-          JSON.stringify(req.session.user)
-        );
-
-        return res.redirect(`/?t=${Date.now()}`);
-
-      }
-      catch (saveError) {
-
-        console.log(
-          'SAVE FLOW ERROR:',
-          saveError
-        );
-
-        return res.status(500).json({
-
-          success: false,
-
-          error: 'Session save failed'
-        });
-      }
+        if (err) {
+          reject(err);
+        }
+        else {
+          resolve();
+        }
+      });
     });
+
+    console.log('SESSION SAVED');
+
+    return res.redirect(`/?t=${Date.now()}`);
 
   }
   catch (error) {
 
-    console.log('=============== LAUNCH ERROR ===============');
+    console.log('====================================');
+    console.log('LAUNCH ERROR');
+    console.log('====================================');
 
     console.log(
       'ERROR MESSAGE:',
@@ -550,6 +621,7 @@ app.get('/launch', async (req, res) => {
     });
   }
 });
+
 app.get('/api/me', async (req, res) => {
 
   try {
