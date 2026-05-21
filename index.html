@@ -7,6 +7,8 @@
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
+  <div id="approval-launcher-root"></div>
+
   <div class="page">
     <header class="header">
       <div class="header-copy">
@@ -66,6 +68,38 @@
   </div>
 
   <div id="toastContainer" class="toast-container"></div>
+
+  <script>
+    (function () {
+      async function initDoceboLauncher() {
+        try {
+          if (!window.DFlow) {
+            console.warn('Docebo launcher not available');
+            return;
+          }
+
+          if (typeof DFlow.start === 'function') {
+            await DFlow.start({
+              container: '#approval-launcher-root'
+            });
+          }
+
+          if (typeof DFlow.getCommandBus === 'function') {
+            DFlow.getCommandBus().send('open', 'launcher', {});
+          }
+        } catch (error) {
+          console.error('Docebo launcher init failed:', error);
+        }
+      }
+
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initDoceboLauncher);
+      } else {
+        initDoceboLauncher();
+      }
+    })();
+  </script>
+
   <script src="./app.js"></script>
 </body>
 </html>
