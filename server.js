@@ -710,6 +710,37 @@ app.get('/', (req, res) => {
   );
 });
 
+app.get('/debug/users', async (req, res) => {
+
+  try {
+
+    const token = await loginToDocebo();
+
+    const response = await doceboGet(
+      token,
+      `${DOCEBO_BASE_URL}/manage/v1/user`,
+      {
+        page: 1,
+        page_size: 50
+      }
+    );
+
+    return res.json(response);
+
+  }
+  catch (error) {
+
+    return res.status(500).json({
+
+      success: false,
+
+      error: error.message,
+
+      details: error.response?.data || null
+    });
+  }
+});
+
 app.listen(PORT, () => {
 
   console.log(
