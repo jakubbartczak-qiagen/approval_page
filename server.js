@@ -332,11 +332,28 @@ app.get('/api/auth/bootstrap', async (req, res) => {
 
 app.get('/launch', async (req, res) => {
   try {
-    const { username, time, sig } = bootstrapFromRequest(req);
-    if (!username || !time || !sig) return res.status(400).send('Missing bootstrap parameters');
-    return res.redirect(`/api/auth/bootstrap?username=${encodeURIComponent(username)}&time=${encodeURIComponent(time)}&sig=${encodeURIComponent(sig)}`);
+    const userId = String(req.query.user_id || req.query.userId || '').trim();
+    if (!userId) {
+      return res.status(400).json({ success: false, error: 'Missing user_id' });
+    }
+
+    const token = await loginToDocebo();
+    const user = await getUserByUsername(token, userId);
+
+    req.session.user = user;
+    req.session.username = user.username || userId;
+    req.session.doceboToken = token;
+
+    req.session.save(err => {
+      if (err) {
+        console.error('session save error:', err);
+        return res.status(500).json({ success: false, error: 'Session save failed' });
+      }
+      return res.redirect('/');
+    });
   } catch (error) {
-    return res.status(500).send('Launch failed');
+    console.error('launch error:', error.response?.data || error.message);
+    return res.status(500).json({ success: false, error: 'Failed to launch session' });
   }
 });
 async function bootstrapSessionFromUsername(req, res, username) {
