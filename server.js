@@ -369,15 +369,15 @@ app.get('/health', (req, res) => {
   });
 });
 
-app.get('/debug/launch', (req, res) => {
+app.get('/launch', async (req, res) => {
 
-  res.json({
+  return res.json({
 
-    query: req.query,
+    raw_query: req.query,
 
-    cookies: req.headers.cookie || null,
+    raw_url: req.originalUrl,
 
-    session: req.session || null
+    headers: req.headers
   });
 });
 
