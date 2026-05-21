@@ -135,7 +135,7 @@ async function searchUsers(token, params = {}) {
 
   const response = await doceboGet(
     token,
-    `${DOCEBO_BASE_URL}/manage/v1/user`,
+    `${DOCEBO_BASE_URL}/manage/v1/users`,
     params
   );
 
@@ -732,7 +732,7 @@ app.get('/debug/users', async (req, res) => {
 
     const response = await doceboGet(
       token,
-      `${DOCEBO_BASE_URL}/manage/v1/user`,
+      `${DOCEBO_BASE_URL}/manage/v1/users`,
       {
         page: 1,
         page_size: 50
