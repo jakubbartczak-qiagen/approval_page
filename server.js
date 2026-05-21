@@ -156,10 +156,31 @@ async function getUserById(token, userId) {
 
   const users = await searchUsers(
     token,
-    { user_id: userId }
+    {
+      page_size: 200
+    }
   );
 
-  return mapUser(users[0] || {});
+  console.log(
+    'SEARCHING USER ID:',
+    userId
+  );
+
+  const exact = users.find(
+    u =>
+      String(
+        u.user_id
+        || u.id
+        || ''
+      ) === String(userId)
+  );
+
+  console.log(
+    'FOUND USER:',
+    exact
+  );
+
+  return mapUser(exact || {});
 }
 
 async function getUserByUsername(token, username) {
