@@ -146,7 +146,7 @@ async function getUserById(token, userId) {
 
     const response = await doceboGet(
       token,
-      `${DOCEBO_BASE_URL}/manage/v1/users`,
+      `${DOCEBO_BASE_URL}/manage/v1/user`,
       {
         page,
         page_size: 200
@@ -224,7 +224,7 @@ async function getUserByUsername(token, username) {
 
     const response = await doceboGet(
       token,
-      `${DOCEBO_BASE_URL}/manage/v1/users`,
+      `${DOCEBO_BASE_URL}/manage/v1/user`,
       {
         page,
         page_size: 200
@@ -463,7 +463,7 @@ app.get('/debug/users', async (req, res) => {
 
     const response = await doceboGet(
       token,
-      `${DOCEBO_BASE_URL}/manage/v1/users`,
+      `${DOCEBO_BASE_URL}/manage/v1/user`,
       {
         page: Number(req.query.page || 1),
         page_size: 200
