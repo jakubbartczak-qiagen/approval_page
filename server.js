@@ -131,95 +131,49 @@ function mapUser(user = {}) {
   };
 }
 
-async function getUserById(token, userId) {
+async function getBootstrapUser(req) {
 
-  console.log('SEARCHING USER ID:', userId);
+  try {
 
-  let page = 1;
-
-  while (page <= 500) {
-
-    console.log('CHECK PAGE:', page);
-
-    try {
-
-      const response = await doceboGet(
-        token,
-        `${DOCEBO_BASE_URL}/manage/v1/users`,
-        {
-          page,
-          page_size: 200
+    const response = await axios.get(
+      `${DOCEBO_BASE_URL}/manage/v1/site/bootstrap`,
+      {
+        headers: {
+          cookie: req.headers.cookie || ''
         }
-      );
-
-      const users =
-        response?.data?.items
-        || response?.data?.users
-        || response?.users
-        || [];
-
-      console.log(
-        `PAGE ${page} -> ${users.length} USERS`
-      );
-
-      const found = users.find(
-        u =>
-          String(
-            u.user_id
-            || u.id
-            || ''
-          ) === String(userId)
-      );
-
-      if (found) {
-
-        console.log('FOUND USER:', found);
-
-        return mapUser(found);
       }
+    );
 
-      const totalPages = Number(
-        response?.data?.total_page_count
-        || 0
-      );
+    console.log(
+      'BOOTSTRAP RESPONSE:',
+      JSON.stringify(response.data)
+    );
 
-      if (!totalPages || page >= totalPages) {
-        break;
-      }
+    const user =
+      response.data?.data?.user
+      || response.data?.user
+      || {};
 
-      page++;
-    }
-    catch (err) {
-
-      console.log(
-        'PAGE ERROR:',
-        page,
-        err.response?.data || err.message
-      );
-
-      break;
-    }
+    return mapUser(user);
   }
+  catch (error) {
 
-  console.log('USER NOT FOUND');
+    console.log(
+      'BOOTSTRAP ERROR:',
+      error.response?.data || error.message
+    );
 
-  return null;
+    return null;
+  }
 }
 
 async function getSubordinates(token, managerId) {
-
-  console.log('GET SUBORDINATES:', managerId);
 
   try {
 
     const response = await doceboGet(
       token,
       `${DOCEBO_BASE_URL}/manage/v1/managers/${managerId}/subordinates`
-    );
-
-    console.log(
-      'SUBORDINATES RESPONSE:',
-      JSON.stringify(response)
     );
 
     const items =
@@ -253,8 +207,6 @@ async function getSubordinates(token, managerId) {
 
 async function getPendingUsers(token) {
 
-  console.log('GET PENDING USERS');
-
   try {
 
     const response = await doceboGet(
@@ -264,10 +216,6 @@ async function getPendingUsers(token) {
         page: 1,
         page_size: 200
       }
-    );
-
-    console.log(
-      'PENDING USERS OK'
     );
 
     return (
@@ -280,7 +228,7 @@ async function getPendingUsers(token) {
 
     console.log(
       'PENDING USERS ERROR:',
-      JSON.stringify(error.response?.data)
+      error.response?.data || error.message
     );
 
     return [];
@@ -413,41 +361,20 @@ app.get('/health', (req, res) => {
   });
 });
 
-app.get('/debug/iframe', (req, res) => {
-
-  res.json({
-
-    query: req.query,
-
-    url: req.originalUrl,
-
-    headers: {
-
-      referer: req.headers.referer,
-
-      host: req.headers.host,
-
-      'sec-fetch-dest': req.headers['sec-fetch-dest']
-    }
-  });
-});
-
-app.get('/debug/users', async (req, res) => {
+app.get('/debug/bootstrap', async (req, res) => {
 
   try {
 
-    const token = await loginToDocebo();
-
-    const response = await doceboGet(
-      token,
-      `${DOCEBO_BASE_URL}/manage/v1/users`,
+    const response = await axios.get(
+      `${DOCEBO_BASE_URL}/manage/v1/site/bootstrap`,
       {
-        page: 1,
-        page_size: 50
+        headers: {
+          cookie: req.headers.cookie || ''
+        }
       }
     );
 
-    return res.json(response);
+    return res.json(response.data);
   }
   catch (error) {
 
@@ -466,56 +393,26 @@ app.get('/launch', async (req, res) => {
 
   try {
 
-    console.log('================ LAUNCH START ================');
+    console.log('BOOTSTRAP LOGIN START');
 
-    console.log('RAW QUERY:', req.query);
-
-    const rawUserId = req.query.user_id;
-
-    console.log('RAW USER ID:', rawUserId);
-
-    if (
-      !rawUserId
-      || rawUserId === '[user_id]'
-      || rawUserId === '{user_id}'
-    ) {
-
-      return res.status(400).json({
-
-        success: false,
-
-        error:
-          'Docebo did not replace user_id placeholder'
-      });
-    }
-
-    const userId = String(rawUserId).trim();
-
-    console.log('FINAL USER ID:', userId);
-
-    const token = await loginToDocebo();
-
-    console.log('TOKEN OK');
-
-    const user = await getUserById(
-      token,
-      userId
-    );
+    const user = await getBootstrapUser(req);
 
     console.log(
-      'FOUND USER:',
+      'BOOTSTRAP USER:',
       JSON.stringify(user)
     );
 
     if (!user || !user.user_id) {
 
-      return res.status(404).json({
+      return res.status(401).json({
 
         success: false,
 
-        error: 'User not found in Docebo'
+        error: 'Cannot detect logged user from Docebo session'
       });
     }
+
+    const token = await loginToDocebo();
 
     req.session.user = user;
 
@@ -536,17 +433,13 @@ app.get('/launch', async (req, res) => {
       });
     });
 
-    console.log('SESSION SAVED');
-
-    return res.redirect(`/?t=${Date.now()}`);
+    return res.redirect('/');
   }
   catch (error) {
 
-    console.log('LAUNCH ERROR');
-
     console.log(
-      error.response?.data
-      || error.message
+      'LAUNCH ERROR:',
+      error.response?.data || error.message
     );
 
     return res.status(500).json({
