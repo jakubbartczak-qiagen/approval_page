@@ -355,7 +355,7 @@ function buildCourseUrl(courseId, slug) {
 async function loadDashboard(token, manager) {
 
   const subordinates =
-    await getSubordinates(token, manager.user_id);
+    await getSubordinates(token, manager.user_id, manager.username);
 
   const subordinateIds =
     new Set(subordinates.map(x => String(x.user_id)));
@@ -364,57 +364,24 @@ async function loadDashboard(token, manager) {
     await getPendingUsers(token);
 
   const items = pending
-
-    .filter(item =>
-      subordinateIds.has(String(item.user_id))
-    )
-
+    .filter(item => subordinateIds.has(String(item.user_id)))
     .map(item => ({
-
-      user_id:
-        String(item.user_id || ''),
-
-      fullname:
-        item.fullname || '',
-
-      email:
-        item.email || '',
-
-      course_id:
-        String(item.course_id || ''),
-
-      course_name:
-        item.course_name || '',
-
-      session_id:
-        String(item.session_id || ''),
-
-      session_name:
-        item.session_name || '-',
-
-      session_start:
-        item.session_start || '-',
-
-      session_end:
-        item.session_end || '-',
-
-      enrollment_status:
-        item.enrollment_status || '',
-
-      course_url:
-        buildCourseUrl(
-          item.course_id,
-          item.course_slug
-        )
+      user_id:           String(item.user_id || ''),
+      fullname:          item.fullname || '',
+      email:             item.email || '',
+      course_id:         String(item.course_id || ''),
+      course_name:       item.course_name || '',
+      session_id:        String(item.session_id || ''),
+      session_name:      item.session_name  || '-',
+      session_start:     item.session_start || '-',
+      session_end:       item.session_end   || '-',
+      enrollment_status: item.enrollment_status || '',
+      course_url:        buildCourseUrl(item.course_id, item.course_slug)
     }));
 
   return {
-
     manager,
-
-    subordinates_count:
-      subordinates.length,
-
+    subordinates_count: subordinates.length,
     items
   };
 }
