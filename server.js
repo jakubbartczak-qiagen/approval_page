@@ -6,7 +6,11 @@ const cors           = require('cors');
 const session        = require('express-session');
 const { Sequelize }  = require('sequelize');
 const SequelizeStore = require('connect-session-sequelize')(session.Store);
-const path           = require('path');pi
+const path           = require('path');
+
+const app  = express();
+const PORT = process.env.PORT || 3000;
+
 const DOCEBO_BASE_URL = (process.env.DOCEBO_BASE_URL || '').replace(/\/$/, '');
 
 app.set('trust proxy', 1);
@@ -194,7 +198,6 @@ async function loadDashboard(token, manager) {
   const subordinates   = await getSubordinates(token, manager.user_id, manager.username);
   const subordinateIds = new Set(subordinates.map(x => String(x.user_id)));
 
-  // Mapa subordinate_id -> dane, żeby uzupełnić fullname i email
   const subordinateMap = {};
   subordinates.forEach(s => { subordinateMap[String(s.user_id)] = s; });
 
@@ -211,7 +214,7 @@ async function loadDashboard(token, manager) {
         course_id:         String(item.course_id || ''),
         course_name:       item.course_name || '',
         session_id:        String(item.session_id || ''),
-        session_name:      item.session_name  || (item.session_id ? `Session ${item.session_id}` : '-'),
+        session_name:      item.session_name || (item.session_id ? `Session ${item.session_id}` : '-'),
         session_start:     item.session_start || '-',
         session_end:       item.session_end   || '-',
         enrollment_status: item.enrollment_status || '',
@@ -350,7 +353,7 @@ app.get('/api/pending-items', async (req, res) => {
           course_id:         String(item.course_id || ''),
           course_name:       item.course_name || '',
           session_id:        String(item.session_id || ''),
-          session_name:      item.session_name  || (item.session_id ? `Session ${item.session_id}` : '-'),
+          session_name:      item.session_name || (item.session_id ? `Session ${item.session_id}` : '-'),
           session_start:     item.session_start || '-',
           session_end:       item.session_end   || '-',
           enrollment_status: item.enrollment_status || '',
