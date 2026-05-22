@@ -231,59 +231,105 @@ app.get('/health', (req, res) => res.json({ ok: true }));
 
 // POST /api/init — called from index.html with user_id from URL params
 app.post('/api/init', async (req, res) => {
+
   try {
-    req.session.user         = null;
-    req.session.user_id      = null;
-    req.session.doceboToken  = null;
 
-    const userId   = String(req.body.user_id || '').trim();
-    const username = normalize(req.body.username || '');
+    console.log('================ INIT START ================');
 
-    console.log('INIT user_id:', userId);
-    console.log('INIT username:', username);
-
-    if (!userId || userId.includes('[') || userId.includes('{') || userId.includes('%')) {
-      return res.status(400).json({
-        success: false,
-        error:   'Docebo did not replace user_id placeholder'
-      });
-    }
+    console.log('HEADERS:', req.headers);
 
     const token = await loginToDocebo();
 
-    let user = await getUserById(token, userId);
+    console.log('TOKEN OK');
 
-    if (!user.user_id && username) {
-      user = await getUserByUsername(token, username);
-    }
+    // bootstrap
+    const bootstrapResponse = await axios.get(
 
-    if (!user.user_id) {
-      return res.status(404).json({
+      `${DOCEBO_BASE_URL}/manage/v1/site/bootstrap`,
+
+      {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      }
+    );
+
+    console.log(
+      'BOOTSTRAP:',
+      JSON.stringify(bootstrapResponse.data)
+    );
+
+    // próbujemy pobrać aktualnego usera
+    const currentUser =
+      bootstrapResponse.data?.data?.user ||
+      bootstrapResponse.data?.user ||
+      null;
+
+    console.log('CURRENT USER RAW:', currentUser);
+
+    // fallback:
+    // bootstrap często nie zwraca usera dla service token
+    // więc próbujemy pobrać użytkownika z session cookies
+
+    if (!currentUser) {
+
+      return res.status(401).json({
+
         success: false,
-        error:   'User not found in Docebo'
+
+        error:
+          'Bootstrap does not expose logged user in external iframe environment',
+
+        details: bootstrapResponse.data
       });
     }
 
-    req.session.user        = user;
-    req.session.user_id     = user.user_id;
+    const user = mapUser(currentUser);
+
+    console.log('MAPPED USER:', user);
+
+    req.session.user = user;
+
+    req.session.user_id = user.user_id;
+
     req.session.doceboToken = token;
 
     await new Promise((resolve, reject) => {
-      req.session.save(err => err ? reject(err) : resolve());
+
+      req.session.save(err => {
+
+        if (err) reject(err);
+        else resolve();
+      });
     });
 
-    return res.json({ success: true, user });
+    return res.json({
 
-  } catch (error) {
-    console.error(error.response?.data || error.message);
+      success: true,
+
+      user
+    });
+
+  }
+  catch (error) {
+
+    console.log('INIT ERROR:', error.message);
+
+    console.log(
+      'ERROR DETAILS:',
+      JSON.stringify(error.response?.data)
+    );
+
     return res.status(500).json({
+
       success: false,
-      error:   error.message,
+
+      error: error.message,
+
       details: error.response?.data || null
     });
   }
 });
-
 app.get('/api/me', async (req, res) => {
   try {
     if (!req.session.user) {
