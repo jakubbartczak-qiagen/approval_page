@@ -6,11 +6,7 @@ const cors           = require('cors');
 const session        = require('express-session');
 const { Sequelize }  = require('sequelize');
 const SequelizeStore = require('connect-session-sequelize')(session.Store);
-const path           = require('path');
-
-const app  = express();
-const PORT = process.env.PORT || 3000;
-
+const path           = require('path');pi
 const DOCEBO_BASE_URL = (process.env.DOCEBO_BASE_URL || '').replace(/\/$/, '');
 
 app.set('trust proxy', 1);
@@ -384,22 +380,34 @@ app.get('/api/pending-items', async (req, res) => {
 app.post('/api/approve', async (req, res) => {
   try {
     const { courseId, sessionId, userId } = req.body;
+    console.log('APPROVE:', { courseId, sessionId, userId });
     await approveEnrollment(req.session.doceboToken, courseId, userId, sessionId);
     return res.json({ success: true, message: 'Enrollment approved successfully.' });
   } catch (error) {
-    console.error(error.response?.data || error.message);
-    return res.status(500).json({ success: false, error: 'Approval failed' });
+    console.error('APPROVE ERROR STATUS:', error.response?.status);
+    console.error('APPROVE ERROR DATA:', JSON.stringify(error.response?.data || error.message));
+    return res.status(500).json({
+      success: false,
+      error:   'Approval failed',
+      details: error.response?.data || error.message
+    });
   }
 });
 
 app.post('/api/deny', async (req, res) => {
   try {
     const { courseId, sessionId, userId } = req.body;
+    console.log('DENY:', { courseId, sessionId, userId });
     await denyEnrollment(req.session.doceboToken, courseId, userId, sessionId);
     return res.json({ success: true, message: 'Enrollment declined successfully.' });
   } catch (error) {
-    console.error(error.response?.data || error.message);
-    return res.status(500).json({ success: false, error: 'Decline failed' });
+    console.error('DENY ERROR STATUS:', error.response?.status);
+    console.error('DENY ERROR DATA:', JSON.stringify(error.response?.data || error.message));
+    return res.status(500).json({
+      success: false,
+      error:   'Decline failed',
+      details: error.response?.data || error.message
+    });
   }
 });
 
