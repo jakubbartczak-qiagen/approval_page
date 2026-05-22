@@ -517,24 +517,22 @@ app.post('/api/init', async (req, res) => {
 
     // NAJWAŻNIEJSZY CHECK
 
-    if (
-      !userId ||
-      userId.includes('[') ||
-      userId.includes('{') ||
-      userId.includes('%')
-    ) {
+   if (!userId || userId.includes('[') || userId.includes('{')) {
+  return res.status(400).json({
+    success: false,
+    error: 'Docebo did not replace user_id placeholder',
+    received_user_id: userId
+  });
+}
 
-      return res.status(400).json({
+const authCode  = String(req.body.auth_code || '').trim();
+const saltSecret = process.env.IFRAME_SALT_SECRET || '';
 
-        success: false,
+if (saltSecret && !authCode) {
+  console.warn('WARNING: salt secret configured but no auth_code received');
+}
 
-        error:
-          'Docebo did not replace user_id placeholder',
-
-        received_user_id:
-          userId
-      });
-    }
+console.log('AUTH CODE:', authCode ? 'present' : 'missing');
 
     // LOGIN
 
