@@ -197,23 +197,31 @@ function buildCourseUrl(courseId, slug) {
 async function loadDashboard(token, manager) {
   const subordinates   = await getSubordinates(token, manager.user_id, manager.username);
   const subordinateIds = new Set(subordinates.map(x => String(x.user_id)));
-  const pending        = await getPendingUsers(token);
+
+  // Mapa subordinate_id -> dane, żeby uzupełnić fullname i email
+  const subordinateMap = {};
+  subordinates.forEach(s => { subordinateMap[String(s.user_id)] = s; });
+
+  const pending = await getPendingUsers(token);
 
   const items = pending
     .filter(item => subordinateIds.has(String(item.user_id)))
-    .map(item => ({
-      user_id:           String(item.user_id || ''),
-      fullname:          item.fullname || '',
-      email:             item.email || '',
-      course_id:         String(item.course_id || ''),
-      course_name:       item.course_name || '',
-      session_id:        String(item.session_id || ''),
-      session_name:      item.session_name  || '-',
-      session_start:     item.session_start || '-',
-      session_end:       item.session_end   || '-',
-      enrollment_status: item.enrollment_status || '',
-      course_url:        buildCourseUrl(item.course_id, item.course_slug)
-    }));
+    .map(item => {
+      const sub = subordinateMap[String(item.user_id)] || {};
+      return {
+        user_id:           String(item.user_id || ''),
+        fullname:          sub.fullname || item.fullname || item.username || '',
+        email:             sub.email    || item.email    || item.username || '',
+        course_id:         String(item.course_id || ''),
+        course_name:       item.course_name || '',
+        session_id:        String(item.session_id || ''),
+        session_name:      item.session_name  || (item.session_id ? `Session ${item.session_id}` : '-'),
+        session_start:     item.session_start || '-',
+        session_end:       item.session_end   || '-',
+        enrollment_status: item.enrollment_status || '',
+        course_url:        buildCourseUrl(item.course_id, item.course_slug)
+      };
+    });
 
   return { manager, subordinates_count: subordinates.length, items };
 }
@@ -317,7 +325,6 @@ app.get('/api/pending-items', async (req, res) => {
     try {
       subordinates = await getSubordinates(req.session.doceboToken, req.session.user.user_id, req.session.user.username);
       console.log('SUBORDINATES COUNT:', subordinates.length);
-      console.log('SUBORDINATES:', JSON.stringify(subordinates));
     } catch (e) {
       console.error('SUBORDINATES ERROR:', e.response?.status, JSON.stringify(e.response?.data || e.message));
       return res.status(500).json({ success: false, error: 'Failed fetching subordinates', details: e.response?.data || e.message });
@@ -327,28 +334,33 @@ app.get('/api/pending-items', async (req, res) => {
     try {
       pending = await getPendingUsers(req.session.doceboToken);
       console.log('PENDING COUNT:', pending.length);
-      console.log('PENDING SAMPLE:', JSON.stringify(pending.slice(0, 3)));
     } catch (e) {
       console.error('PENDING ERROR:', e.response?.status, JSON.stringify(e.response?.data || e.message));
       return res.status(500).json({ success: false, error: 'Failed fetching pending users', details: e.response?.data || e.message });
     }
 
     const subordinateIds = new Set(subordinates.map(x => String(x.user_id)));
+    const subordinateMap = {};
+    subordinates.forEach(s => { subordinateMap[String(s.user_id)] = s; });
+
     const items = pending
       .filter(item => subordinateIds.has(String(item.user_id)))
-      .map(item => ({
-        user_id:           String(item.user_id || ''),
-        fullname:          item.fullname || '',
-        email:             item.email || '',
-        course_id:         String(item.course_id || ''),
-        course_name:       item.course_name || '',
-        session_id:        String(item.session_id || ''),
-        session_name:      item.session_name  || '-',
-        session_start:     item.session_start || '-',
-        session_end:       item.session_end   || '-',
-        enrollment_status: item.enrollment_status || '',
-        course_url:        buildCourseUrl(item.course_id, item.course_slug)
-      }));
+      .map(item => {
+        const sub = subordinateMap[String(item.user_id)] || {};
+        return {
+          user_id:           String(item.user_id || ''),
+          fullname:          sub.fullname || item.fullname || item.username || '',
+          email:             sub.email    || item.email    || item.username || '',
+          course_id:         String(item.course_id || ''),
+          course_name:       item.course_name || '',
+          session_id:        String(item.session_id || ''),
+          session_name:      item.session_name  || (item.session_id ? `Session ${item.session_id}` : '-'),
+          session_start:     item.session_start || '-',
+          session_end:       item.session_end   || '-',
+          enrollment_status: item.enrollment_status || '',
+          course_url:        buildCourseUrl(item.course_id, item.course_slug)
+        };
+      });
 
     console.log('MATCHED ITEMS:', items.length);
 
