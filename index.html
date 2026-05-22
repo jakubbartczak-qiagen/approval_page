@@ -3,26 +3,61 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
   <title>QIAlearn My Teams Trainings Approvals</title>
+
   <link rel="stylesheet" href="./styles.css" />
+
+  <!-- DOCEBO BOOTSTRAP -->
+  <script>
+    window.DOCEBO_CONFIG = {
+      useBootstrapSession: true
+    };
+  </script>
 </head>
+
 <body>
-  <div id="approval-launcher-root"></div>
+
+  <!-- HIDDEN BOOTSTRAP CONTAINER -->
+  <div id="approval-launcher-root" style="display:none;"></div>
 
   <div class="page">
+
     <header class="header">
+
       <div class="header-copy">
         <h1>QIAlearn My Teams Trainings Approvals</h1>
-        <p class="subtitle">Review and manage pending training enrollment requests for your direct employees.</p>
+
+        <p class="subtitle">
+          Review and manage pending training enrollment requests
+          for your direct employees.
+        </p>
       </div>
 
       <div class="header-actions">
-        <a class="btn btn-link-primary" href="#" id="returnBtn">Return to My Team Page</a>
-        <button id="refreshBtn" class="btn btn-secondary" type="button">Refresh</button>
+
+        <a
+          class="btn btn-link-primary"
+          href="#"
+          id="returnBtn"
+        >
+          Return to My Team Page
+        </a>
+
+        <button
+          id="refreshBtn"
+          class="btn btn-secondary"
+          type="button"
+        >
+          Refresh
+        </button>
+
       </div>
+
     </header>
 
     <section class="summary">
+
       <article class="summary-card">
         <span class="summary-label">Manager</span>
         <strong id="managerUsername">-</strong>
@@ -37,14 +72,23 @@
         <span class="summary-label">Pending Items</span>
         <strong id="pendingCount">0</strong>
       </article>
+
     </section>
 
     <div id="messageBox" class="message hidden"></div>
-    <div id="loadingBox" class="panel hidden">Loading pending approvals...</div>
-    <div id="emptyState" class="panel hidden">No pending approvals found for this manager.</div>
+
+    <div id="loadingBox" class="panel hidden">
+      Loading pending approvals...
+    </div>
+
+    <div id="emptyState" class="panel hidden">
+      No pending approvals found for this manager.
+    </div>
 
     <section id="tableWrapper" class="table-wrapper hidden">
+
       <table>
+
         <thead>
           <tr>
             <th>User</th>
@@ -58,48 +102,154 @@
             <th>Actions</th>
           </tr>
         </thead>
+
         <tbody id="tableBody"></tbody>
+
       </table>
+
     </section>
 
     <footer class="page-footer">
-      <div class="page-footer-text">Created by Jakub Bartczak</div>
+      <div class="page-footer-text">
+        Created by Jakub Bartczak
+      </div>
     </footer>
+
   </div>
 
   <div id="toastContainer" class="toast-container"></div>
 
+  <!-- ========================= -->
+  <!-- DOCEBO SESSION BOOTSTRAP -->
+  <!-- ========================= -->
+
   <script>
-    (function () {
-      async function initDoceboLauncher() {
-        try {
-          if (!window.DFlow) {
-            console.warn('Docebo launcher not available');
-            return;
-          }
 
-          if (typeof DFlow.start === 'function') {
-            await DFlow.start({
-              container: '#approval-launcher-root'
-            });
-          }
+    async function bootstrapDoceboUser() {
 
-          if (typeof DFlow.getCommandBus === 'function') {
-            DFlow.getCommandBus().send('open', 'launcher', {});
+      try {
+
+        console.log('BOOTSTRAP START');
+
+        const response = await fetch(
+          '/manage/v1/site/bootstrap',
+          {
+            credentials: 'include'
           }
-        } catch (error) {
-          console.error('Docebo launcher init failed:', error);
+        );
+
+        const bootstrap = await response.json();
+
+        console.log('BOOTSTRAP RESPONSE:', bootstrap);
+
+        if (!bootstrap?.data?.is_logged_in) {
+
+          document.body.innerHTML = `
+            <div style="
+              padding:40px;
+              font-family:Arial;
+              text-align:center;
+            ">
+              <h2>User is not logged into Docebo</h2>
+            </div>
+          `;
+
+          return;
         }
-      }
 
-      if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', initDoceboLauncher);
-      } else {
-        initDoceboLauncher();
+        const user = bootstrap?.data?.current_user;
+
+        console.log('CURRENT USER:', user);
+
+        if (!user) {
+
+          document.body.innerHTML = `
+            <div style="
+              padding:40px;
+              font-family:Arial;
+              text-align:center;
+            ">
+              <h2>Unable to detect logged user</h2>
+            </div>
+          `;
+
+          return;
+        }
+
+        const userId =
+          user.user_id
+          || user.id
+          || '';
+
+        const username =
+          user.username
+          || user.email
+          || '';
+
+        console.log('USER ID:', userId);
+        console.log('USERNAME:', username);
+
+        const launchUrl =
+          `/launch-bootstrap?user_id=${encodeURIComponent(userId)}&username=${encodeURIComponent(username)}`;
+
+        console.log('CALLING:', launchUrl);
+
+        const launchResponse = await fetch(
+          launchUrl,
+          {
+            credentials: 'include'
+          }
+        );
+
+        const launchData = await launchResponse.json();
+
+        console.log('LAUNCH RESPONSE:', launchData);
+
+        if (!launchData.success) {
+
+          document.body.innerHTML = `
+            <div style="
+              padding:40px;
+              font-family:Arial;
+              text-align:center;
+              color:red;
+            ">
+              <h2>${launchData.error}</h2>
+            </div>
+          `;
+
+          return;
+        }
+
+        window.APP_READY = true;
+
+        document.dispatchEvent(
+          new CustomEvent('approval-user-ready')
+        );
+
       }
-    })();
+      catch (error) {
+
+        console.error(error);
+
+        document.body.innerHTML = `
+          <div style="
+            padding:40px;
+            font-family:Arial;
+            text-align:center;
+            color:red;
+          ">
+            <h2>${error.message}</h2>
+          </div>
+        `;
+      }
+    }
+
+    bootstrapDoceboUser();
+
   </script>
 
   <script src="./app.js"></script>
+
 </body>
 </html>
