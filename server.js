@@ -286,28 +286,32 @@ async function getUserByUsername(token, username) {
 // SUBORDINATES
 // ─────────────────────────────────────────────────────────────
 
-async function getSubordinates(token, managerId) {
-  console.log('SUBORDINATES URL:', `${DOCEBO_BASE_URL}/manage/v1/managers/${managerId}/subordinates`);
-  try {
-    const response = await doceboGet(
-      token,
-      `${DOCEBO_BASE_URL}/manage/v1/managers/${managerId}/subordinates`
-    );
-    console.log('SUBORDINATES RAW:', JSON.stringify(response));
-    const items = response?.data?.items || response?.items || [];
-    return items.map(item => ({
-      user_id:  String(item.user_id || ''),
-      username: normalize(item.username || ''),
-      fullname: item.fullname || `${item.firstname || ''} ${item.lastname || ''}`.trim(),
-      email:    normalize(item.email || '')
-    }));
-  } catch (e) {
-    console.error('SUBORDINATES ERROR STATUS:', e.response?.status);
-    console.error('SUBORDINATES ERROR DATA:', JSON.stringify(e.response?.data || e.message));
-    throw e;
-  }
-}
+async function getSubordinates(token, managerId, managerUsername) {
 
+  const response = await doceboGet(
+    token,
+    `${DOCEBO_BASE_URL}/manage/v1/managers/subordinates`,
+    {
+      search_text: managerUsername,
+      page:        1,
+      page_size:   200
+    }
+  );
+
+  console.log('SUBORDINATES RAW:', JSON.stringify(response));
+
+  const items =
+    response?.data?.items ||
+    response?.items ||
+    [];
+
+  return items.map(item => ({
+    user_id:  String(item.user_id || ''),
+    username: normalize(item.username || ''),
+    fullname: item.fullname || `${item.firstname || ''} ${item.lastname || ''}`.trim(),
+    email:    normalize(item.email || '')
+  }));
+}
 // ─────────────────────────────────────────────────────────────
 // PENDING USERS
 // ─────────────────────────────────────────────────────────────
