@@ -70,25 +70,10 @@ async function loginToDocebo() {
   const params = new URLSearchParams();
 
   params.append('grant_type', 'password');
-  params.append(
-    'client_id',
-    process.env.DOCEBO_CLIENT_ID
-  );
-
-  params.append(
-    'client_secret',
-    process.env.DOCEBO_CLIENT_SECRET
-  );
-
-  params.append(
-    'username',
-    process.env.DOCEBO_USERNAME
-  );
-
-  params.append(
-    'password',
-    process.env.DOCEBO_PASSWORD
-  );
+  params.append('client_id', process.env.DOCEBO_CLIENT_ID);
+  params.append('client_secret', process.env.DOCEBO_CLIENT_SECRET);
+  params.append('username', process.env.DOCEBO_USERNAME);
+  params.append('password', process.env.DOCEBO_PASSWORD);
 
   const response = await axios.post(
     `${DOCEBO_BASE_URL}/oauth2/token`,
@@ -128,9 +113,9 @@ function mapUser(user = {}) {
   return {
 
     user_id: String(
-      user.user_id
-      || user.id
-      || ''
+      user.user_id ||
+      user.id ||
+      ''
     ),
 
     username: normalize(
@@ -138,14 +123,14 @@ function mapUser(user = {}) {
     ),
 
     firstname:
-      user.firstname
-      || user.first_name
-      || '',
+      user.firstname ||
+      user.first_name ||
+      '',
 
     lastname:
-      user.lastname
-      || user.last_name
-      || '',
+      user.lastname ||
+      user.last_name ||
+      '',
 
     email: normalize(
       user.email || ''
@@ -158,18 +143,12 @@ async function getUserById(
   userId
 ) {
 
-  console.log(
-    'SEARCH USER:',
-    userId
-  );
-
   let page = 1;
 
   while (page <= 500) {
 
     console.log(
-      'CHECK PAGE:',
-      page
+      `SEARCH PAGE ${page}`
     );
 
     const response = await doceboGet(
@@ -182,17 +161,17 @@ async function getUserById(
     );
 
     const users =
-      response?.data?.items
-      || response?.data?.users
-      || response?.users
-      || [];
+      response?.data?.items ||
+      response?.data?.users ||
+      response?.users ||
+      [];
 
     const found = users.find(
       u =>
         String(
-          u.user_id
-          || u.id
-          || ''
+          u.user_id ||
+          u.id ||
+          ''
         ) === String(userId)
     );
 
@@ -206,15 +185,14 @@ async function getUserById(
       return mapUser(found);
     }
 
-    const totalPages =
-      Number(
-        response?.data?.total_page_count
-        || 0
-      );
+    const totalPages = Number(
+      response?.data?.total_page_count ||
+      0
+    );
 
     if (
-      totalPages > 0
-      && page >= totalPages
+      totalPages &&
+      page >= totalPages
     ) {
       break;
     }
@@ -223,6 +201,38 @@ async function getUserById(
   }
 
   return {};
+}
+
+async function getUserByUsername(
+  token,
+  username
+) {
+
+  const response = await doceboGet(
+    token,
+    `${DOCEBO_BASE_URL}/manage/v1/user`,
+    {
+      page: 1,
+      page_size: 50,
+      search_text: username
+    }
+  );
+
+  const users =
+    response?.data?.items ||
+    response?.data?.users ||
+    response?.users ||
+    [];
+
+  const exact = users.find(
+    u =>
+      normalize(u.username)
+      === normalize(username)
+  );
+
+  return mapUser(
+    exact || users[0] || {}
+  );
 }
 
 async function getSubordinates(
@@ -236,9 +246,9 @@ async function getSubordinates(
   );
 
   const items =
-    response?.data?.items
-    || response?.items
-    || [];
+    response?.data?.items ||
+    response?.items ||
+    [];
 
   return items.map(item => ({
 
@@ -251,8 +261,8 @@ async function getSubordinates(
     ),
 
     fullname:
-      item.fullname
-      || `${item.firstname || ''} ${item.lastname || ''}`.trim(),
+      item.fullname ||
+      `${item.firstname || ''} ${item.lastname || ''}`.trim(),
 
     email: normalize(
       item.email || ''
@@ -274,9 +284,9 @@ async function getPendingUsers(
   );
 
   return (
-    response?.data?.items
-    || response?.items
-    || []
+    response?.data?.items ||
+    response?.items ||
+    []
   );
 }
 
@@ -286,6 +296,7 @@ function buildCourseUrl(
 ) {
 
   if (slug) {
+
     return `${DOCEBO_BASE_URL}/course/${slug}`;
   }
 
@@ -303,12 +314,11 @@ async function loadDashboard(
       manager.user_id
     );
 
-  const subordinateIds =
-    new Set(
-      subordinates.map(
-        x => String(x.user_id)
-      )
-    );
+  const subordinateIds = new Set(
+    subordinates.map(
+      x => String(x.user_id)
+    )
+  );
 
   const pending =
     await getPendingUsers(token);
@@ -389,6 +399,7 @@ async function approveEnrollment(
   };
 
   if (sessionId) {
+
     body.session_id =
       Number(sessionId);
   }
@@ -398,8 +409,10 @@ async function approveEnrollment(
     body,
     {
       headers: {
+
         Authorization:
           `Bearer ${token}`,
+
         'Content-Type':
           'application/json'
       }
@@ -418,10 +431,13 @@ async function denyEnrollment(
     `${DOCEBO_BASE_URL}/learn/v1/enrollments/${courseId}/${userId}`;
 
   if (sessionId) {
-    url += `?session_id=${sessionId}`;
+
+    url +=
+      `?session_id=${sessionId}`;
   }
 
   await axios.delete(url, {
+
     headers: {
       Authorization:
         `Bearer ${token}`
@@ -429,15 +445,12 @@ async function denyEnrollment(
   });
 }
 
-app.get(
-  '/health',
-  (req, res) => {
+app.get('/health', (req, res) => {
 
-    res.json({
-      ok: true
-    });
-  }
-);
+  res.json({
+    ok: true
+  });
+});
 
 app.get(
   '/debug/iframe',
@@ -450,6 +463,7 @@ app.get(
       url: req.originalUrl,
 
       headers: {
+
         referer:
           req.headers.referer,
 
@@ -465,30 +479,38 @@ app.get(
   }
 );
 
-app.get(
-  '/launch',
+app.post(
+  '/api/init',
   async (req, res) => {
 
     try {
 
-      console.log(
-        '============= LAUNCH START ============='
+      req.session.user = null;
+      req.session.user_id = null;
+      req.session.doceboToken = null;
+
+      const userId = String(
+        req.body.user_id || ''
+      ).trim();
+
+      const username = normalize(
+        req.body.username || ''
       );
 
       console.log(
-        'QUERY:',
-        req.query
+        'INIT USER ID:',
+        userId
       );
 
-      const rawUserId =
-        String(
-          req.query.user_id || ''
-        ).trim();
+      console.log(
+        'INIT USERNAME:',
+        username
+      );
 
       if (
-        !rawUserId
-        || rawUserId.includes('{')
-        || rawUserId.includes('[')
+        !userId ||
+        userId.includes('[') ||
+        userId.includes('{')
       ) {
 
         return res.status(400).json({
@@ -503,16 +525,23 @@ app.get(
       const token =
         await loginToDocebo();
 
-      const user =
+      let user =
         await getUserById(
           token,
-          rawUserId
+          userId
         );
 
-      console.log(
-        'FOUND USER:',
-        user
-      );
+      if (
+        !user.user_id &&
+        username
+      ) {
+
+        user =
+          await getUserByUsername(
+            token,
+            username
+          );
+      }
 
       if (!user.user_id) {
 
@@ -539,35 +568,27 @@ app.get(
           req.session.save(err => {
 
             if (err) {
+
               reject(err);
             }
             else {
+
               resolve();
             }
           });
         }
       );
 
-      console.log(
-        'SESSION SAVED'
-      );
+      return res.json({
 
-      return res.sendFile(
-        path.join(
-          __dirname,
-          'index.html'
-        )
-      );
+        success: true,
+
+        user
+      });
     }
     catch (error) {
 
       console.log(
-        'LAUNCH ERROR:',
-        error.message
-      );
-
-      console.log(
-        'DETAILS:',
         error.response?.data
       );
 
@@ -575,11 +596,11 @@ app.get(
 
         success: false,
 
-        error:
-          error.message,
+        error: error.message,
 
         details:
-          error.response?.data || null
+          error.response?.data
+          || null
       });
     }
   }
@@ -606,8 +627,7 @@ app.get(
 
         success: true,
 
-        user:
-          req.session.user
+        user: req.session.user
       });
     }
     catch (error) {
@@ -766,18 +786,15 @@ app.use(
   express.static(__dirname)
 );
 
-app.get(
-  '/',
-  (req, res) => {
+app.get('/', (req, res) => {
 
-    res.sendFile(
-      path.join(
-        __dirname,
-        'index.html'
-      )
-    );
-  }
-);
+  res.sendFile(
+    path.join(
+      __dirname,
+      'index.html'
+    )
+  );
+});
 
 app.listen(PORT, () => {
 
