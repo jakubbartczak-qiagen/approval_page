@@ -14,42 +14,67 @@
     <header class="header">
       <div class="header-copy">
         <h1>QIAlearn My Teams Trainings Approvals</h1>
+
         <p class="subtitle">
           Review and manage pending training enrollment requests
           for your direct employees.
         </p>
       </div>
+
       <div class="header-actions">
-        <a class="btn btn-link-primary" href="#" id="returnBtn">
+
+        <a
+          class="btn btn-link-primary"
+          href="#"
+          id="returnBtn"
+        >
           Return to My Team Page
         </a>
-        <button id="refreshBtn" class="btn btn-secondary" type="button">
+
+        <button
+          id="refreshBtn"
+          class="btn btn-secondary"
+          type="button"
+        >
           Refresh
         </button>
+
       </div>
     </header>
 
     <section class="summary">
+
       <article class="summary-card">
         <span class="summary-label">Manager</span>
         <strong id="managerUsername">-</strong>
       </article>
+
       <article class="summary-card">
         <span class="summary-label">Direct Employees</span>
         <strong id="subordinatesCount">0</strong>
       </article>
+
       <article class="summary-card">
         <span class="summary-label">Pending Items</span>
         <strong id="pendingCount">0</strong>
       </article>
+
     </section>
 
     <div id="messageBox" class="message hidden"></div>
-    <div id="loadingBox" class="panel hidden">Loading pending approvals...</div>
-    <div id="emptyState" class="panel hidden">No pending approvals found for this manager.</div>
+
+    <div id="loadingBox" class="panel hidden">
+      Loading pending approvals...
+    </div>
+
+    <div id="emptyState" class="panel hidden">
+      No pending approvals found for this manager.
+    </div>
 
     <section id="tableWrapper" class="table-wrapper hidden">
+
       <table>
+
         <thead>
           <tr>
             <th>User</th>
@@ -63,12 +88,17 @@
             <th>Actions</th>
           </tr>
         </thead>
+
         <tbody id="tableBody"></tbody>
+
       </table>
+
     </section>
 
     <footer class="page-footer">
-      <div class="page-footer-text">Created by Jakub Bartczak</div>
+      <div class="page-footer-text">
+        Created by Jakub Bartczak
+      </div>
     </footer>
 
   </div>
@@ -76,67 +106,95 @@
   <div id="toastContainer" class="toast-container"></div>
 
   <script>
+
     async function initApp() {
+
       try {
-        const params   = new URLSearchParams(window.location.search);
-        const userId   = params.get('user_id')  || '';
-        const username = params.get('username') || '';
 
-        console.log('INIT — user_id:', userId, 'username:', username);
+        console.log('INIT APP');
 
-        // Tymczasowy debug — widać w tytule zakładki. Usuń po weryfikacji.
-        document.title = 'UID: ' + (userId || 'BRAK');
+        const response = await fetch('/api/init', {
 
-        // Sprawdź czy Docebo zastąpił placeholder prawdziwym ID
-        if (!userId || userId.includes('[') || userId.includes('{') || userId.includes('%')) {
-          document.body.innerHTML = `
-            <div style="padding:40px;font-family:Arial;text-align:center;color:#c0003c;">
-              <h2>Brak poprawnego user_id w URL</h2>
-              <p style="word-break:break-all;font-size:13px;color:#555;">
-                Obecny URL: ${location.href}
-              </p>
-              <p style="font-size:12px;color:#888;">
-                Sprawdź konfigurację widgetu w Docebo — placeholder nie został zastąpiony.<br>
-                Spróbuj zmienić składnię na: [userid] lub {user_id} lub %user_id%
-              </p>
-            </div>`;
-          return;
-        }
+          method: 'POST',
 
-        // Zainicjuj sesję na backendzie
-        const res  = await fetch('/api/init', {
-          method:      'POST',
           credentials: 'include',
-          headers:     { 'Content-Type': 'application/json' },
-          body:        JSON.stringify({ user_id: userId, username })
+
+          headers: {
+            'Content-Type': 'application/json'
+          }
         });
 
-        const data = await res.json();
+        const data = await response.json();
+
         console.log('INIT RESPONSE:', data);
 
         if (!data.success) {
+
           document.body.innerHTML = `
-            <div style="padding:40px;font-family:Arial;text-align:center;color:#c0003c;">
-              <h2>${data.error || 'Nieznany błąd'}</h2>
-              ${data.details ? `<pre style="font-size:11px;color:#555;text-align:left;max-width:600px;margin:0 auto;overflow:auto;">${JSON.stringify(data.details, null, 2)}</pre>` : ''}
-            </div>`;
+            <div style="
+              padding:40px;
+              font-family:Arial;
+              text-align:center;
+              color:#c0003c;
+            ">
+
+              <h2>
+                ${data.error || 'Initialization failed'}
+              </h2>
+
+              ${
+                data.details
+                  ? `
+                    <pre style="
+                      margin-top:20px;
+                      text-align:left;
+                      overflow:auto;
+                      max-width:900px;
+                      margin-left:auto;
+                      margin-right:auto;
+                      background:#f5f5f5;
+                      padding:20px;
+                      border-radius:10px;
+                      font-size:12px;
+                    ">${JSON.stringify(data.details, null, 2)}</pre>
+                  `
+                  : ''
+              }
+
+            </div>
+          `;
+
           return;
         }
 
-        // Sesja gotowa — odpal aplikację
         window.APP_READY = true;
-        document.dispatchEvent(new CustomEvent('approval-user-ready'));
 
-      } catch (err) {
-        console.error(err);
+        document.dispatchEvent(
+          new CustomEvent('approval-user-ready')
+        );
+
+      }
+      catch (error) {
+
+        console.error(error);
+
         document.body.innerHTML = `
-          <div style="padding:40px;font-family:Arial;text-align:center;color:#c0003c;">
-            <h2>${err.message}</h2>
-          </div>`;
+          <div style="
+            padding:40px;
+            font-family:Arial;
+            text-align:center;
+            color:#c0003c;
+          ">
+
+            <h2>${error.message}</h2>
+
+          </div>
+        `;
       }
     }
 
     initApp();
+
   </script>
 
   <script src="./app.js"></script>
