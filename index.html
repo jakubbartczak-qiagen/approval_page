@@ -1,239 +1,105 @@
 <!DOCTYPE html>
-<html lang="en">
-
+<html lang="pl">
 <head>
-
   <meta charset="UTF-8" />
-
-  <meta
-    name="viewport"
-    content="width=device-width, initial-scale=1.0"
-  />
-
-  <title>Approvals</title>
-
-  <style>
-
-    body {
-      font-family: Arial, sans-serif;
-      margin: 20px;
-      background: #f5f5f5;
-    }
-
-    .card {
-      background: white;
-      padding: 20px;
-      margin-bottom: 20px;
-      border-radius: 8px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    }
-
-    button {
-      padding: 10px 16px;
-      margin-right: 10px;
-      cursor: pointer;
-    }
-
-  </style>
-
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>QIAlearn My Teams Trainings Approvals</title>
+  <link rel="stylesheet" href="./styles.css" />
 </head>
-
 <body>
+  <div id="approval-launcher-root"></div>
 
-  <h1>Pending Enrollments</h1>
+  <div class="page">
+    <header class="header">
+      <div class="header-copy">
+        <h1>QIAlearn My Teams Trainings Approvals</h1>
+        <p class="subtitle">Review and manage pending training enrollment requests for your direct employees.</p>
+      </div>
 
-  <div id="content">
-    Loading...
+      <div class="header-actions">
+        <a class="btn btn-link-primary" href="#" id="returnBtn">Return to My Team Page</a>
+        <button id="refreshBtn" class="btn btn-secondary" type="button">Refresh</button>
+      </div>
+    </header>
+
+    <section class="summary">
+      <article class="summary-card">
+        <span class="summary-label">Manager</span>
+        <strong id="managerUsername">-</strong>
+      </article>
+
+      <article class="summary-card">
+        <span class="summary-label">Direct Employees</span>
+        <strong id="subordinatesCount">0</strong>
+      </article>
+
+      <article class="summary-card">
+        <span class="summary-label">Pending Items</span>
+        <strong id="pendingCount">0</strong>
+      </article>
+    </section>
+
+    <div id="messageBox" class="message hidden"></div>
+    <div id="loadingBox" class="panel hidden">Loading pending approvals...</div>
+    <div id="emptyState" class="panel hidden">No pending approvals found for this manager.</div>
+
+    <section id="tableWrapper" class="table-wrapper hidden">
+      <table>
+        <thead>
+          <tr>
+            <th>User</th>
+            <th>Email</th>
+            <th>Course</th>
+            <th>Session Name</th>
+            <th>Session Start</th>
+            <th>Session End</th>
+            <th>Status</th>
+            <th>Course Link</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="tableBody"></tbody>
+      </table>
+    </section>
+
+    <footer class="page-footer">
+      <div class="page-footer-text">Created by Jakub Bartczak</div>
+    </footer>
   </div>
 
+  <div id="toastContainer" class="toast-container"></div>
+
   <script>
-
-    async function api(
-      url,
-      options = {}
-    ) {
-
-      const response = await fetch(
-        url,
-        {
-          credentials: 'include',
-          ...options
-        }
-      );
-
-      return response.json();
-    }
-
-    async function load() {
-
-      try {
-
-        const me =
-          await api('/api/me');
-
-        console.log(
-          'ME:',
-          me
-        );
-
-        const data =
-          await api(
-            '/api/pending-items'
-          );
-
-        console.log(
-          'PENDING:',
-          data
-        );
-
-        const content =
-          document.getElementById(
-            'content'
-          );
-
-        if (
-          !data.items
-          || !data.items.length
-        ) {
-
-          content.innerHTML =
-            '<div class="card">No pending enrollments.</div>';
-
-          return;
-        }
-
-        content.innerHTML = '';
-
-        data.items.forEach(
-          item => {
-
-            const div =
-              document.createElement(
-                'div'
-              );
-
-            div.className =
-              'card';
-
-            div.innerHTML = `
-
-              <h3>${item.course_name}</h3>
-
-              <p>
-                <strong>User:</strong>
-                ${item.fullname}
-              </p>
-
-              <p>
-                <strong>Email:</strong>
-                ${item.email}
-              </p>
-
-              <p>
-                <strong>Session:</strong>
-                ${item.session_name}
-              </p>
-
-              <button
-                onclick="approve(
-                  '${item.course_id}',
-                  '${item.session_id}',
-                  '${item.user_id}'
-                )"
-              >
-                Approve
-              </button>
-
-              <button
-                onclick="deny(
-                  '${item.course_id}',
-                  '${item.session_id}',
-                  '${item.user_id}'
-                )"
-              >
-                Deny
-              </button>
-            `;
-
-            content.appendChild(
-              div
-            );
+    (function () {
+      async function initDoceboLauncher() {
+        try {
+          if (!window.DFlow) {
+            console.warn('Docebo launcher not available');
+            return;
           }
-        );
-      }
-      catch (error) {
 
-        console.error(error);
+          if (typeof DFlow.start === 'function') {
+            await DFlow.start({
+              container: '#approval-launcher-root'
+            });
+          }
 
-        document.getElementById(
-          'content'
-        ).innerHTML = `
-          <div class="card">
-            Error loading dashboard.
-          </div>
-        `;
-      }
-    }
-
-    async function approve(
-      courseId,
-      sessionId,
-      userId
-    ) {
-
-      await api(
-        '/api/approve',
-        {
-          method: 'POST',
-
-          headers: {
-            'Content-Type':
-              'application/json'
-          },
-
-          body: JSON.stringify({
-
-            courseId,
-            sessionId,
-            userId
-          })
+          if (typeof DFlow.getCommandBus === 'function') {
+            DFlow.getCommandBus().send('open', 'launcher', {});
+          }
+        } catch (error) {
+          console.error('Docebo launcher init failed:', error);
         }
-      );
+      }
 
-      load();
-    }
-
-    async function deny(
-      courseId,
-      sessionId,
-      userId
-    ) {
-
-      await api(
-        '/api/deny',
-        {
-          method: 'POST',
-
-          headers: {
-            'Content-Type':
-              'application/json'
-          },
-
-          body: JSON.stringify({
-
-            courseId,
-            sessionId,
-            userId
-          })
-        }
-      );
-
-      load();
-    }
-
-    load();
-
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initDoceboLauncher);
+      } else {
+        initDoceboLauncher();
+      }
+    })();
   </script>
 
+  <script src="./app.js"></script>
 </body>
 </html>
