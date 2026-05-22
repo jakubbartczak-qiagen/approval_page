@@ -105,68 +105,76 @@
 
   <div id="toastContainer" class="toast-container"></div>
 
-<script>
-  async function initApp() {
-    try {
-      console.log('INIT APP');
+  <script>
+    async function initApp() {
+      try {
+        console.log('INIT APP');
 
-      const params = new URLSearchParams(window.location.search);
-      const userId   = params.get('user_id') || params.get('userId') || '';
-      const username = params.get('username') || params.get('user') || '';
+        const params   = new URLSearchParams(window.location.search);
+        const userId   = params.get('user_id')   || params.get('userId')   || '';
+        const username = params.get('username')  || params.get('user')     || '';
+        const authCode = params.get('auth_code') || params.get('authCode') || '';
+        const hash     = params.get('hash')      || '';
 
-      console.log('URL user_id:', userId);
-      console.log('URL username:', username);
+        console.log('URL user_id:', userId);
+        console.log('URL username:', username);
+        console.log('URL auth_code:', authCode ? 'present' : 'missing');
 
-      if (!userId && !username) {
+        if (!userId && !username) {
+          document.body.innerHTML = `
+            <div style="padding:40px;font-family:Arial;text-align:center;color:#c0003c;">
+              <h2>Brak user_id w URL</h2>
+              <p>Aplikacja musi być otwarta przez Docebo z parametrem <code>?user_id=...</code> w adresie.</p>
+              <p style="font-size:12px;color:#888;">URL: ${window.location.href}</p>
+            </div>
+          `;
+          return;
+        }
+
+        const response = await fetch('/api/init', {
+          method:      'POST',
+          credentials: 'include',
+          headers:     { 'Content-Type': 'application/json' },
+          body:        JSON.stringify({
+            user_id:   userId,
+            username:  username,
+            auth_code: authCode,
+            hash:      hash
+          })
+        });
+
+        const data = await response.json();
+        console.log('INIT RESPONSE:', data);
+
+        if (!data.success) {
+          document.body.innerHTML = `
+            <div style="padding:40px;font-family:Arial;text-align:center;color:#c0003c;">
+              <h2>${data.error || 'Initialization failed'}</h2>
+              ${data.details
+                ? `<pre style="margin-top:20px;text-align:left;overflow:auto;max-width:900px;
+                     margin-left:auto;margin-right:auto;background:#f5f5f5;padding:20px;
+                     border-radius:10px;font-size:12px;">${JSON.stringify(data.details, null, 2)}</pre>`
+                : ''}
+            </div>
+          `;
+          return;
+        }
+
+        window.APP_READY = true;
+        document.dispatchEvent(new CustomEvent('approval-user-ready'));
+
+      } catch (error) {
+        console.error(error);
         document.body.innerHTML = `
           <div style="padding:40px;font-family:Arial;text-align:center;color:#c0003c;">
-            <h2>Brak user_id w URL</h2>
-            <p>Aplikacja musi być otwarta przez Docebo z parametrem <code>?user_id=...</code> w adresie.</p>
-            <p style="font-size:12px;color:#888;">URL: ${window.location.href}</p>
+            <h2>${error.message}</h2>
           </div>
         `;
-        return;
       }
-
-      const response = await fetch('/api/init', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: userId, username })
-      });
-
-      const data = await response.json();
-      console.log('INIT RESPONSE:', data);
-
-      if (!data.success) {
-        document.body.innerHTML = `
-          <div style="padding:40px;font-family:Arial;text-align:center;color:#c0003c;">
-            <h2>${data.error || 'Initialization failed'}</h2>
-            ${data.details
-              ? `<pre style="margin-top:20px;text-align:left;overflow:auto;max-width:900px;
-                   margin-left:auto;margin-right:auto;background:#f5f5f5;padding:20px;
-                   border-radius:10px;font-size:12px;">${JSON.stringify(data.details, null, 2)}</pre>`
-              : ''}
-          </div>
-        `;
-        return;
-      }
-
-      window.APP_READY = true;
-      document.dispatchEvent(new CustomEvent('approval-user-ready'));
-
-    } catch (error) {
-      console.error(error);
-      document.body.innerHTML = `
-        <div style="padding:40px;font-family:Arial;text-align:center;color:#c0003c;">
-          <h2>${error.message}</h2>
-        </div>
-      `;
     }
-  }
 
-  initApp();
-</script>
+    initApp();
+  </script>
 
   <script src="./app.js"></script>
 
