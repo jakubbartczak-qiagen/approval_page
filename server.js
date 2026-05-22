@@ -288,24 +288,54 @@ async function getUserByUsername(token, username) {
 
 async function getSubordinates(token, managerId, managerUsername) {
 
-  const response = await doceboGet(
-    token,
-    `${DOCEBO_BASE_URL}/manage/v1/managers/subordinates`,
-    {
-      search_text: managerUsername,
-      page:        1,
-      page_size:   200
+  let page = 1;
+  let allItems = [];
+
+  while (true) {
+    const response = await doceboGet(
+      token,
+      `${DOCEBO_BASE_URL}/manage/v1/managers/subordinates`,
+      { page, page_size: 200 }
+    );
+
+    const items =
+      response?.data?.items ||
+      response?.items ||
+      [];
+
+    if (page === 1) {
+      console.log('SUBORDINATES FIRST ITEM:', JSON.stringify(items[0] || {}));
+      console.log('SUBORDINATES TOTAL:', response?.data?.total_count || response?.total_count || 'unknown');
     }
-  );
 
-  console.log('SUBORDINATES RAW:', JSON.stringify(response));
+    allItems = allItems.concat(items);
 
-  const items =
-    response?.data?.items ||
-    response?.items ||
-    [];
+    const totalPages = Number(response?.data?.total_page_count || response?.total_page_count || 1);
+    if (page >= totalPages || items.length === 0) break;
+    page++;
+  }
 
-  return items.map(item => ({
+  console.log('SUBORDINATES ALL COUNT:', allItems.length);
+
+  // Filtruj po manager_id
+  const filtered = allItems.filter(item => {
+    const itemManagerId = String(
+      item.manager_id ||
+      item.managerid ||
+      item.manager?.user_id ||
+      ''
+    );
+    return itemManagerId === String(managerId);
+  });
+
+  console.log('SUBORDINATES FILTERED COUNT:', filtered.length);
+
+  // Jeśli filtrowanie nie zadziałało, zaloguj klucze pierwszego itemu
+  if (filtered.length === 0 && allItems.length > 0) {
+    console.log('SUBORDINATES KEYS:', Object.keys(allItems[0]));
+  }
+
+  return filtered.map(item => ({
     user_id:  String(item.user_id || ''),
     username: normalize(item.username || ''),
     fullname: item.fullname || `${item.firstname || ''} ${item.lastname || ''}`.trim(),
