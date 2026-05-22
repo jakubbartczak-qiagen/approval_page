@@ -335,13 +335,13 @@ async function getSubordinates(token, managerId, managerUsername) {
     console.log('SUBORDINATES KEYS:', Object.keys(allItems[0]));
   }
 
-  return filtered.map(item => ({
-    user_id:  String(item.user_id || ''),
-    username: normalize(item.username || ''),
-    fullname: item.fullname || `${item.firstname || ''} ${item.lastname || ''}`.trim(),
-    email:    normalize(item.email || '')
-  }));
-}
+return filtered.map(item => ({
+  user_id:  String(item.subordinate_id || item.user_id || ''),
+  username: normalize(item.subordinate_username || item.username || ''),
+  fullname: item.subordinate_fullname || item.fullname ||
+            `${item.subordinate_firstname || ''} ${item.subordinate_lastname || ''}`.trim(),
+  email:    normalize(item.subordinate_email || item.email || '')
+}));
 // ─────────────────────────────────────────────────────────────
 // PENDING USERS
 // ─────────────────────────────────────────────────────────────
