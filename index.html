@@ -11,10 +11,19 @@
 
   <div class="page">
 
+    <div class="banner">
+      <img
+        src="https://d36spl5w3z9i0o.cloudfront.net/files/q/i/qiagensandbox_docebosaas_com/userfiles/34995/qialearn_banner.jpg"
+        alt="QIAlearn banner"
+        width="1200"
+        height="auto"
+        loading="eager"
+      />
+    </div>
+
     <header class="header">
       <div class="header-copy">
         <h1>QIAlearn My Team Trainings Approvals</h1>
-
         <p class="subtitle">
           Review and manage pending training enrollment requests
           for your direct employees.
@@ -22,59 +31,36 @@
       </div>
 
       <div class="header-actions">
-
-        <a
-          class="btn btn-link-primary"
-          href="#"
-          id="returnBtn"
-        >
+        <a class="btn btn-link-primary" href="#" id="returnBtn">
           Return to My Team Page
         </a>
-
-        <button
-          id="refreshBtn"
-          class="btn btn-secondary"
-          type="button"
-        >
+        <button id="refreshBtn" class="btn btn-secondary" type="button">
           Refresh
         </button>
-
       </div>
     </header>
 
     <section class="summary">
-
       <article class="summary-card">
         <span class="summary-label">Manager</span>
         <strong id="managerUsername">-</strong>
       </article>
-
       <article class="summary-card">
         <span class="summary-label">Direct Employees</span>
         <strong id="subordinatesCount">0</strong>
       </article>
-
       <article class="summary-card">
         <span class="summary-label">Pending Items</span>
         <strong id="pendingCount">0</strong>
       </article>
-
     </section>
 
     <div id="messageBox" class="message hidden"></div>
-
-    <div id="loadingBox" class="panel hidden">
-      Loading pending approvals...
-    </div>
-
-    <div id="emptyState" class="panel hidden">
-      No pending approvals found for this manager.
-    </div>
+    <div id="loadingBox" class="panel hidden">Loading pending approvals...</div>
+    <div id="emptyState" class="panel hidden">No pending approvals found for this manager.</div>
 
     <section id="tableWrapper" class="table-wrapper hidden">
-
       <table>
-
         <thead>
           <tr>
             <th>User</th>
@@ -88,17 +74,12 @@
             <th>Actions</th>
           </tr>
         </thead>
-
         <tbody id="tableBody"></tbody>
-
       </table>
-
     </section>
 
     <footer class="page-footer">
-      <div class="page-footer-text">
-        Created by Jakub Bartczak
-      </div>
+      <div class="page-footer-text">Created by Jakub Bartczak</div>
     </footer>
 
   </div>
@@ -135,12 +116,7 @@
           method:      'POST',
           credentials: 'include',
           headers:     { 'Content-Type': 'application/json' },
-          body:        JSON.stringify({
-            user_id:   userId,
-            username:  username,
-            auth_code: authCode,
-            hash:      hash
-          })
+          body:        JSON.stringify({ user_id: userId, username, auth_code: authCode, hash })
         });
 
         const data = await response.json();
