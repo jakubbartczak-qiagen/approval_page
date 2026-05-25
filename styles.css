@@ -55,7 +55,13 @@ body {
 
 .header h1 { margin: 0 0 8px; font-size: 32px; line-height: 1.2; color: var(--brand-navy); letter-spacing: -0.02em; }
 .header p { margin: 0; color: var(--text-muted); }
-.subtitle { font-size: 15px; color: var(--text-muted); max-width: 780px; line-height: 1.5; }
+.subtitle {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--brand-navy);
+  max-width: 780px;
+  line-height: 1.5;
+}
 .header-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px; margin-bottom: 20px; }
 .summary-card, .panel, .table-wrapper, .message { background: var(--card-bg); border-radius: 16px; border: 1px solid var(--border-color); box-shadow: 0 8px 22px rgba(27, 48, 103, 0.06); }
