@@ -367,22 +367,18 @@ app.get('/api/pending-items', async (req, res) => {
 
     console.log('DASHBOARD START for user_id:', req.session.user.user_id);
 
-    let subordinates = [];
+    // ── Subordinates i pending pobierane równolegle ──────────
+    let subordinates, pending;
     try {
-      subordinates = await getSubordinates(req.session.doceboToken, req.session.user.user_id, req.session.user.username);
+      [subordinates, pending] = await Promise.all([
+        getSubordinates(req.session.doceboToken, req.session.user.user_id, req.session.user.username),
+        getPendingUsers(req.session.doceboToken)
+      ]);
       console.log('SUBORDINATES COUNT:', subordinates.length);
-    } catch (e) {
-      console.error('SUBORDINATES ERROR:', e.response?.status, JSON.stringify(e.response?.data || e.message));
-      return res.status(500).json({ success: false, error: 'Failed fetching subordinates', details: e.response?.data || e.message });
-    }
-
-    let pending = [];
-    try {
-      pending = await getPendingUsers(req.session.doceboToken);
       console.log('PENDING COUNT:', pending.length);
     } catch (e) {
-      console.error('PENDING ERROR:', e.response?.status, JSON.stringify(e.response?.data || e.message));
-      return res.status(500).json({ success: false, error: 'Failed fetching pending users', details: e.response?.data || e.message });
+      console.error('FETCH ERROR:', e.response?.status, JSON.stringify(e.response?.data || e.message));
+      return res.status(500).json({ success: false, error: 'Failed fetching data', details: e.response?.data || e.message });
     }
 
     const subordinateIds = new Set(subordinates.map(x => String(x.user_id)));
