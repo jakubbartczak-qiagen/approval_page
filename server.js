@@ -90,6 +90,52 @@ async function doceboGet(token, url, params = {}) {
   return response.data;
 }
 
+// ─── Session name lookup ──────────────────────────────────────
+
+async function getSessionName(token, courseId, sessionId) {
+  try {
+    const response = await doceboGet(
+      token,
+      `${DOCEBO_BASE_URL}/course/v1/courses/${courseId}/sessions/${sessionId}`
+    );
+    return response?.data?.name
+        || response?.data?.session_name
+        || response?.name
+        || response?.session_name
+        || null;
+  } catch (e) {
+    console.warn(`getSessionName failed for course=${courseId} session=${sessionId}:`, e.response?.status);
+    return null;
+  }
+}
+
+async function enrichWithSessionNames(token, items) {
+  const pairs = [...new Map(
+    items
+      .filter(i => i.session_id)
+      .map(i => [`${i.course_id}:${i.session_id}`, { courseId: i.course_id, sessionId: i.session_id }])
+  ).values()];
+
+  const results = await Promise.all(
+    pairs.map(async ({ courseId, sessionId }) => {
+      const name = await getSessionName(token, courseId, sessionId);
+      return { key: `${courseId}:${sessionId}`, name };
+    })
+  );
+
+  const nameMap = {};
+  results.forEach(r => { nameMap[r.key] = r.name; });
+
+  return items.map(item => {
+    if (!item.session_id) return item;
+    const resolved = nameMap[`${item.course_id}:${item.session_id}`];
+    return {
+      ...item,
+      session_name: resolved || item.session_name || `Session ${item.session_id}`
+    };
+  });
+}
+
 // ─── Find user by ID ──────────────────────────────────────────
 
 async function getUserById(token, userId) {
@@ -182,7 +228,9 @@ async function getPendingUsers(token) {
     `${DOCEBO_BASE_URL}/learn/v1/enrollment/pending_users`,
     { page: 1, page_size: 200 }
   );
-  return response?.data?.items || response?.items || [];
+  const items = response?.data?.items || response?.items || [];
+  console.log('PENDING FIRST RAW ITEM:', JSON.stringify(items[0] || {}));
+  return items;
 }
 
 // ─── Course URL ───────────────────────────────────────────────
@@ -190,58 +238,6 @@ async function getPendingUsers(token) {
 function buildCourseUrl(courseId, slug) {
   if (slug) return `${DOCEBO_BASE_URL}/course/${slug}`;
   return `${DOCEBO_BASE_URL}/course/view/${courseId}`;
-}
-
-// ─── Dashboard ────────────────────────────────────────────────
-
-async function loadDashboard(token, manager) {
-  const subordinates   = await getSubordinates(token, manager.user_id, manager.username);
-  const subordinateIds = new Set(subordinates.map(x => String(x.user_id)));
-
-  const subordinateMap = {};
-  subordinates.forEach(s => { subordinateMap[String(s.user_id)] = s; });
-
-  const pending = await getPendingUsers(token);
-
-  const items = pending
-    .filter(item => subordinateIds.has(String(item.user_id)))
-    .map(item => {
-      const sub = subordinateMap[String(item.user_id)] || {};
-      return {
-        user_id:           String(item.user_id || ''),
-        fullname:          sub.fullname || item.fullname || item.username || '',
-        email:             sub.email    || item.email    || item.username || '',
-        course_id:         String(item.course_id || ''),
-        course_name:       item.course_name || '',
-        session_id:        String(item.session_id || ''),
-        session_name:      item.session_name || (item.session_id ? `Session ${item.session_id}` : '-'),
-        session_start:     item.session_start || '-',
-        session_end:       item.session_end   || '-',
-        enrollment_status: item.enrollment_status || '',
-        course_url:        buildCourseUrl(item.course_id, item.course_slug)
-      };
-    });
-
-  return { manager, subordinates_count: subordinates.length, items };
-}
-
-// ─── Approve ──────────────────────────────────────────────────
-
-async function approveEnrollment(token, courseId, userId, sessionId) {
-  const url  = `${DOCEBO_BASE_URL}/learn/v1/enrollments/${courseId}/${userId}`;
-  const body = { status: 0 };
-  if (sessionId) body.session_id = Number(sessionId);
-  await axios.put(url, body, {
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
-  });
-}
-
-// ─── Deny ─────────────────────────────────────────────────────
-
-async function denyEnrollment(token, courseId, userId, sessionId) {
-  let url = `${DOCEBO_BASE_URL}/learn/v1/enrollments/${courseId}/${userId}`;
-  if (sessionId) url += `?session_id=${sessionId}`;
-  await axios.delete(url, { headers: { Authorization: `Bearer ${token}` } });
 }
 
 // ─── Routes ───────────────────────────────────────────────────
@@ -342,7 +338,7 @@ app.get('/api/pending-items', async (req, res) => {
     const subordinateMap = {};
     subordinates.forEach(s => { subordinateMap[String(s.user_id)] = s; });
 
-    const items = pending
+    let items = pending
       .filter(item => subordinateIds.has(String(item.user_id)))
       .map(item => {
         const sub = subordinateMap[String(item.user_id)] || {};
@@ -353,13 +349,16 @@ app.get('/api/pending-items', async (req, res) => {
           course_id:         String(item.course_id || ''),
           course_name:       item.course_name || '',
           session_id:        String(item.session_id || ''),
-          session_name:      item.session_name || (item.session_id ? `Session ${item.session_id}` : '-'),
+          session_name:      item.session_name || '',
           session_start:     item.session_start || '-',
           session_end:       item.session_end   || '-',
           enrollment_status: item.enrollment_status || '',
           course_url:        buildCourseUrl(item.course_id, item.course_slug)
         };
       });
+
+    // Enrich session names via API
+    items = await enrichWithSessionNames(req.session.doceboToken, items);
 
     console.log('MATCHED ITEMS:', items.length);
 
@@ -384,7 +383,12 @@ app.post('/api/approve', async (req, res) => {
   try {
     const { courseId, sessionId, userId } = req.body;
     console.log('APPROVE:', { courseId, sessionId, userId });
-    await approveEnrollment(req.session.doceboToken, courseId, userId, sessionId);
+    const url  = `${DOCEBO_BASE_URL}/learn/v1/enrollments/${courseId}/${userId}`;
+    const body = { status: 0 };
+    if (sessionId) body.session_id = Number(sessionId);
+    await axios.put(url, body, {
+      headers: { Authorization: `Bearer ${req.session.doceboToken}`, 'Content-Type': 'application/json' }
+    });
     return res.json({ success: true, message: 'Enrollment approved successfully.' });
   } catch (error) {
     console.error('APPROVE ERROR STATUS:', error.response?.status);
@@ -401,7 +405,9 @@ app.post('/api/deny', async (req, res) => {
   try {
     const { courseId, sessionId, userId } = req.body;
     console.log('DENY:', { courseId, sessionId, userId });
-    await denyEnrollment(req.session.doceboToken, courseId, userId, sessionId);
+    let url = `${DOCEBO_BASE_URL}/learn/v1/enrollments/${courseId}/${userId}`;
+    if (sessionId) url += `?session_id=${sessionId}`;
+    await axios.delete(url, { headers: { Authorization: `Bearer ${req.session.doceboToken}` } });
     return res.json({ success: true, message: 'Enrollment declined successfully.' });
   } catch (error) {
     console.error('DENY ERROR STATUS:', error.response?.status);
