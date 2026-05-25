@@ -142,19 +142,46 @@ async function enrichWithSessionNames(token, items) {
 // ─── Find user by ID ──────────────────────────────────────────
 
 async function getUserById(token, userId) {
-  let page = 1;
+  // 1. Bezpośredni endpoint (1 request)
+  try {
+    const response = await doceboGet(token, `${DOCEBO_BASE_URL}/manage/v1/user/${userId}`);
+    const u = response?.data || response;
+    if (u && (u.user_id || u.id)) {
+      console.log('FOUND USER DIRECT:', u.username);
+      return mapUser(u);
+    }
+  } catch (e) {
+    console.log('DIRECT ENDPOINT failed:', e.response?.status, '— trying search');
+  }
 
-  while (page <= 500) {
-    console.log(`SEARCH PAGE ${page}`);
-    const response = await doceboGet(token, `${DOCEBO_BASE_URL}/manage/v1/user`, { page, page_size: 50 });
+  // 2. Search_text (1 request)
+  try {
+    const response = await doceboGet(token, `${DOCEBO_BASE_URL}/manage/v1/user`, {
+      page: 1, page_size: 200, search_text: userId
+    });
     const users = response?.data?.items || response?.data?.users || response?.users || [];
     const found = users.find(u => String(u.user_id || u.id || '') === String(userId));
-
     if (found) {
-      console.log('FOUND USER:', found.username);
+      console.log('FOUND USER SEARCH:', found.username);
       return mapUser(found);
     }
+  } catch (e) {
+    console.log('SEARCH failed:', e.response?.status, '— falling back to pagination');
+  }
 
+  // 3. Fallback: paginacja 200/strona
+  let page = 1;
+  while (page <= 500) {
+    console.log(`SEARCH PAGE ${page}`);
+    const response = await doceboGet(token, `${DOCEBO_BASE_URL}/manage/v1/user`, {
+      page, page_size: 200
+    });
+    const users = response?.data?.items || response?.data?.users || response?.users || [];
+    const found = users.find(u => String(u.user_id || u.id || '') === String(userId));
+    if (found) {
+      console.log('FOUND USER PAGINATED:', found.username);
+      return mapUser(found);
+    }
     const totalPages = Number(response?.data?.total_page_count || 0);
     if (totalPages && page >= totalPages) break;
     page++;
@@ -167,7 +194,7 @@ async function getUserById(token, userId) {
 
 async function getUserByUsername(token, username) {
   const response = await doceboGet(token, `${DOCEBO_BASE_URL}/manage/v1/user`, {
-    page: 1, page_size: 50, search_text: username
+    page: 1, page_size: 200, search_text: username
   });
   const users = response?.data?.items || response?.data?.users || response?.users || [];
   const exact = users.find(u => normalize(u.username) === normalize(username));
