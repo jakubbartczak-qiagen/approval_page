@@ -237,8 +237,8 @@ async function getPendingUsers(token) {
 // ─── Course URL ───────────────────────────────────────────────
 
 function buildCourseUrl(courseId, slug) {
-  if (slug) return `${DOCEBO_BASE_URL}/course/${slug}`;
-  return `${DOCEBO_BASE_URL}/course/view/${courseId}`;
+  if (slug) return `${DOCEBO_BASE_URL}/course/${slug}/?`;
+  return `${DOCEBO_BASE_URL}/course/view/${courseId}/?`;
 }
 
 // ─── Routes ───────────────────────────────────────────────────
