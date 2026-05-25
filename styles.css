@@ -1,3 +1,17 @@
+.banner {
+  width: 100%;
+  margin-bottom: 24px;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 8px 22px rgba(27, 48, 103, 0.08);
+}
+
+.banner img {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
 :root {
   --brand-blue: #004D9F;
   --brand-white: #FFFFFF;
@@ -64,7 +78,7 @@ th { font-size: 12px; color: var(--brand-navy); text-transform: uppercase; lette
 td { font-size: 14px; color: var(--text-main); white-space: normal; word-break: break-word; }
 tbody tr:hover { background: #f8fbff; }
 th:nth-child(1), td:nth-child(1) { width: 13%; }
-th:nth-child(2), td:nth-child(2) { width: 17%; }
+th:nth-child(2), td:nth-child(2) { width: 22%; }
 th:nth-child(3), td:nth-child(3) { width: 21%; }
 th:nth-child(4), td:nth-child(4) { width: 15%; }
 th:nth-child(5), td:nth-child(5), th:nth-child(6), td:nth-child(6) { width: 10%; }
@@ -117,4 +131,5 @@ th:nth-child(7), td:nth-child(7), th:nth-child(9), td:nth-child(9) { width: 1%; 
 @media (max-width: 768px) {
   table { min-width: 960px; }
   .page-footer-text { font-size: 10px; padding: 4px 10px; }
+  .banner { border-radius: 10px; }
 }
