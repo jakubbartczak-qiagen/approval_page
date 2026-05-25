@@ -23,7 +23,7 @@ const sequelize = new Sequelize({
 
 const sessionStore = new SequelizeStore({ db: sequelize });
 sessionStore.sync();
-f
+
 app.use((req, res, next) => {
   res.setHeader('Content-Security-Policy', "frame-ancestors 'self' https://*.docebosaas.com");
   next();
@@ -360,7 +360,6 @@ app.get('/api/pending-items', async (req, res) => {
         };
       });
 
-    // Enrich session names via API
     items = await enrichWithSessionNames(req.session.doceboToken, items);
 
     console.log('MATCHED ITEMS:', items.length);
