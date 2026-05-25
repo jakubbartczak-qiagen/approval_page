@@ -5,9 +5,61 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>QIAlearn My Team Trainings Approvals</title>
   <link rel="stylesheet" href="./styles.css" />
+  <style>
+    #appLoader {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      background: linear-gradient(180deg, #eef4fb 0%, #f7fafe 100%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 28px;
+      transition: opacity 0.4s ease;
+    }
+    #appLoader.fade-out {
+      opacity: 0;
+      pointer-events: none;
+    }
+    .loader-logo {
+      font-family: Arial, sans-serif;
+      font-size: 22px;
+      font-weight: 700;
+      color: #1B3067;
+      letter-spacing: -0.01em;
+    }
+    .loader-logo span {
+      color: #004D9F;
+    }
+    .loader-ring {
+      width: 56px;
+      height: 56px;
+      border: 5px solid #CEE0F3;
+      border-top-color: #004D9F;
+      border-radius: 50%;
+      animation: spin 0.85s linear infinite;
+    }
+    .loader-text {
+      font-family: Arial, sans-serif;
+      font-size: 14px;
+      color: #5f7398;
+      letter-spacing: 0.01em;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+  </style>
 </head>
 
 <body>
+
+  <!-- Loading overlay -->
+  <div id="appLoader">
+    <div class="loader-logo">QIA<span>learn</span></div>
+    <div class="loader-ring"></div>
+    <div class="loader-text">Loading, please wait…</div>
+  </div>
 
   <div class="page">
 
@@ -29,7 +81,6 @@
           for your direct employees.
         </p>
       </div>
-
       <div class="header-actions">
         <a class="btn btn-link-primary" href="#" id="returnBtn">
           Return to My Team Page
@@ -87,6 +138,13 @@
   <div id="toastContainer" class="toast-container"></div>
 
   <script>
+    function hideLoader() {
+      const loader = document.getElementById('appLoader');
+      if (!loader) return;
+      loader.classList.add('fade-out');
+      setTimeout(() => loader.remove(), 420);
+    }
+
     async function initApp() {
       try {
         console.log('INIT APP');
@@ -102,6 +160,7 @@
         console.log('URL auth_code:', authCode ? 'present' : 'missing');
 
         if (!userId && !username) {
+          hideLoader();
           document.body.innerHTML = `
             <div style="padding:40px;font-family:Arial;text-align:center;color:#c0003c;">
               <h2>Brak user_id w URL</h2>
@@ -123,6 +182,7 @@
         console.log('INIT RESPONSE:', data);
 
         if (!data.success) {
+          hideLoader();
           document.body.innerHTML = `
             <div style="padding:40px;font-family:Arial;text-align:center;color:#c0003c;">
               <h2>${data.error || 'Initialization failed'}</h2>
@@ -136,11 +196,13 @@
           return;
         }
 
+        hideLoader();
         window.APP_READY = true;
         document.dispatchEvent(new CustomEvent('approval-user-ready'));
 
       } catch (error) {
         console.error(error);
+        hideLoader();
         document.body.innerHTML = `
           <div style="padding:40px;font-family:Arial;text-align:center;color:#c0003c;">
             <h2>${error.message}</h2>
