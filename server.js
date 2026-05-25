@@ -96,10 +96,12 @@ async function getSessionName(token, courseId, sessionId) {
   try {
     const response = await doceboGet(
       token,
-      `${DOCEBO_BASE_URL}/course/v1/courses/${courseId}/sessions/${sessionId}`
+      `${DOCEBO_BASE_URL}/course/v1/sessions/${sessionId}`
     );
+    console.log('SESSION RAW RESPONSE:', JSON.stringify(response));
     return response?.data?.name
         || response?.data?.session_name
+        || response?.data?.title
         || response?.name
         || response?.session_name
         || null;
@@ -108,7 +110,6 @@ async function getSessionName(token, courseId, sessionId) {
     return null;
   }
 }
-
 async function enrichWithSessionNames(token, items) {
   const pairs = [...new Map(
     items
