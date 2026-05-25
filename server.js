@@ -141,8 +141,8 @@ async function enrichWithSessionNames(token, items) {
 
 // ─── Find user by ID ──────────────────────────────────────────
 
-async function getUserById(token, userId) {
-  // 1. Bezpośredni endpoint (1 request)
+async function getUserById(token, userId, username) {
+  // 1. Bezpośredni endpoint po ID (1 request)
   try {
     const response = await doceboGet(token, `${DOCEBO_BASE_URL}/manage/v1/user/${userId}`);
     const u = response?.data || response;
@@ -151,25 +151,46 @@ async function getUserById(token, userId) {
       return mapUser(u);
     }
   } catch (e) {
-    console.log('DIRECT ENDPOINT failed:', e.response?.status, '— trying search');
+    console.log('DIRECT ENDPOINT failed:', e.response?.status);
   }
 
-  // 2. Search_text (1 request)
+  // 2. Search po username/email (1 request)
+  if (username) {
+    try {
+      const response = await doceboGet(token, `${DOCEBO_BASE_URL}/manage/v1/user`, {
+        page: 1, page_size: 200, search_text: username
+      });
+      const users = response?.data?.items || response?.data?.users || response?.users || [];
+      const found = users.find(u =>
+        String(u.user_id || u.id || '') === String(userId) ||
+        normalize(u.username) === normalize(username) ||
+        normalize(u.email)    === normalize(username)
+      );
+      if (found) {
+        console.log('FOUND USER BY USERNAME:', found.username);
+        return mapUser(found);
+      }
+    } catch (e) {
+      console.log('USERNAME SEARCH failed:', e.response?.status);
+    }
+  }
+
+  // 3. Search po userId jako tekst (1 request)
   try {
     const response = await doceboGet(token, `${DOCEBO_BASE_URL}/manage/v1/user`, {
-      page: 1, page_size: 200, search_text: userId
+      page: 1, page_size: 200, search_text: String(userId)
     });
     const users = response?.data?.items || response?.data?.users || response?.users || [];
     const found = users.find(u => String(u.user_id || u.id || '') === String(userId));
     if (found) {
-      console.log('FOUND USER SEARCH:', found.username);
+      console.log('FOUND USER BY ID SEARCH:', found.username);
       return mapUser(found);
     }
   } catch (e) {
-    console.log('SEARCH failed:', e.response?.status, '— falling back to pagination');
+    console.log('ID SEARCH failed:', e.response?.status);
   }
 
-  // 3. Fallback: paginacja 200/strona
+  // 4. Fallback: paginacja 200/strona
   let page = 1;
   while (page <= 500) {
     console.log(`SEARCH PAGE ${page}`);
@@ -297,7 +318,7 @@ app.post('/api/init', async (req, res) => {
     const token = await loginToDocebo();
     console.log('TOKEN OK');
 
-    let user = await getUserById(token, userId);
+    let user = await getUserById(token, userId, username);
 
     if (!user.user_id && username) {
       console.log('USER NOT FOUND BY ID -> TRY USERNAME');
