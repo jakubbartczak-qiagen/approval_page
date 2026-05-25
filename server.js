@@ -90,26 +90,26 @@ async function doceboGet(token, url, params = {}) {
   return response.data;
 }
 
-// ─── Session name lookup ──────────────────────────────────────
+// ─── Session data lookup ──────────────────────────────────────
 
-async function getSessionName(token, courseId, sessionId) {
+async function getSessionData(token, courseId, sessionId) {
   try {
     const response = await doceboGet(
       token,
       `${DOCEBO_BASE_URL}/course/v1/sessions/${sessionId}`
     );
-    console.log('SESSION RAW RESPONSE:', JSON.stringify(response));
-    return response?.data?.name
-        || response?.data?.session_name
-        || response?.data?.title
-        || response?.name
-        || response?.session_name
-        || null;
+    const d = response?.data;
+    return d ? {
+      name:  d.name       || null,
+      start: d.date_start || null,
+      end:   d.date_end   || null
+    } : null;
   } catch (e) {
-    console.warn(`getSessionName failed for course=${courseId} session=${sessionId}:`, e.response?.status);
+    console.warn(`getSessionData failed for course=${courseId} session=${sessionId}:`, e.response?.status);
     return null;
   }
 }
+
 async function enrichWithSessionNames(token, items) {
   const pairs = [...new Map(
     items
@@ -119,20 +119,22 @@ async function enrichWithSessionNames(token, items) {
 
   const results = await Promise.all(
     pairs.map(async ({ courseId, sessionId }) => {
-      const name = await getSessionName(token, courseId, sessionId);
-      return { key: `${courseId}:${sessionId}`, name };
+      const data = await getSessionData(token, courseId, sessionId);
+      return { key: `${courseId}:${sessionId}`, data };
     })
   );
 
-  const nameMap = {};
-  results.forEach(r => { nameMap[r.key] = r.name; });
+  const dataMap = {};
+  results.forEach(r => { dataMap[r.key] = r.data; });
 
   return items.map(item => {
     if (!item.session_id) return item;
-    const resolved = nameMap[`${item.course_id}:${item.session_id}`];
+    const d = dataMap[`${item.course_id}:${item.session_id}`];
     return {
       ...item,
-      session_name: resolved || item.session_name || `Session ${item.session_id}`
+      session_name:  (d?.name)  || item.session_name  || `Session ${item.session_id}`,
+      session_start: (d?.start) || item.session_start || '-',
+      session_end:   (d?.end)   || item.session_end   || '-'
     };
   });
 }
